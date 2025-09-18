@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ブラウザ制御デモ</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  </head>
+  <body>
+    <div class="layout">
+      <section class="chat-pane" aria-label="チャット領域">
+        <header class="chat-header">
+          <h1>ブラウザ制御チャット</h1>
+          <p>左側でLLMからのフィードバックを確認し、指示を送信できます。</p>
+        </header>
+        <div id="messages" class="messages" aria-live="polite" aria-busy="false"></div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <form id="prompt-form" class="prompt-form" autocomplete="off">
+          <label for="prompt-input" class="sr-only">プロンプト</label>
+          <textarea
+            id="prompt-input"
+            name="prompt"
+            placeholder="ブラウザに指示したい内容を入力してください..."
+            rows="4"
+            required
+          ></textarea>
+          <button type="submit">送信</button>
+        </form>
+      </section>
+      <section class="browser-pane" aria-label="ブラウザ画面">
+        <iframe
+          src="{{ browser_url }}"
+          title="コンテナ内ブラウザ"
+          allow="fullscreen"
+          allowfullscreen
+        ></iframe>
+      </section>
+    </div>
+    <script>
+      const messagesElement = document.getElementById('messages');
+      const statusElement = document.getElementById('status');
+      const formElement = document.getElementById('prompt-form');
+      const promptInput = document.getElementById('prompt-input');
+
+      function createMessageElement(message) {
+        const wrapper = document.createElement('div');
+        wrapper.className = `message ${message.role}`;
+
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = message.role === 'assistant' ? 'LLM' : 'ユーザー';
+        wrapper.appendChild(label);
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = message.content;
+        wrapper.appendChild(bubble);
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const timestamp = new Date(message.timestamp);
+        if (!Number.isNaN(timestamp.getTime())) {
+          meta.textContent = timestamp.toLocaleTimeString('ja-JP', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+        }
+        wrapper.appendChild(meta);
+
+        return wrapper;
+      }
+
+      function renderMessages(messages) {
+        messagesElement.innerHTML = '';
+        messages.forEach((message) => {
+          messagesElement.appendChild(createMessageElement(message));
+        });
+        messagesElement.scrollTop = messagesElement.scrollHeight;
+      }
+
+      async function loadHistory() {
+        try {
+          const response = await fetch('/api/history');
+          if (!response.ok) {
+            throw new Error('履歴の取得に失敗しました。');
+          }
+          const data = await response.json();
+          renderMessages(data.messages || []);
+        } catch (error) {
+          statusElement.textContent = error.message;
+        }
+      }
+
+      formElement.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const prompt = promptInput.value.trim();
+        if (!prompt) {
+          statusElement.textContent = 'プロンプトを入力してください。';
+          return;
+        }
+
+        formElement.classList.add('is-sending');
+        statusElement.textContent = 'LLMに送信しています…';
+        messagesElement.setAttribute('aria-busy', 'true');
+
+        try {
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt }),
+          });
+
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({ error: '' }));
+            const message = errorPayload.error || 'LLMへの送信に失敗しました。';
+            throw new Error(message);
+          }
+
+          const data = await response.json();
+          renderMessages(data.messages || []);
+          promptInput.value = '';
+          statusElement.textContent = '完了しました。';
+        } catch (error) {
+          statusElement.textContent = error.message;
+        } finally {
+          formElement.classList.remove('is-sending');
+          messagesElement.setAttribute('aria-busy', 'false');
+        }
+      });
+
+      loadHistory();
+    </script>
+  </body>
+</html>

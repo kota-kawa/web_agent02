@@ -1,0 +1,28 @@
+version: '3.9'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    ports:
+      - '5000:5000'
+    environment:
+      - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale
+    depends_on:
+      - browser
+
+  browser:
+    image: selenium/standalone-chrome:latest
+    shm_size: 2gb
+    ports:
+      - '4444:4444'
+      - '7900:7900'
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:4444/status || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

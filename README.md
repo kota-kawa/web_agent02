@@ -74,6 +74,18 @@ OPENAI_API_KEY=
 
 For other settings, models, and more, check out the [documentation 📕](https://docs.browser-use.com).
 
+# 🧪 Local demo UI (Flask + Selenium)
+
+This repository now includes a simple local dashboard that embeds a real browser session next to an LLM-style chat panel. Everything runs in Docker, so you can try it with a single command.
+
+```bash
+docker compose up --build
+```
+
+Then open [http://localhost:5000](http://localhost:5000) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900](http://localhost:7900); adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
+
+> ℹ️ The chat side currently returns demo status messages so you can wire in your own LLM or agent logic later.
+
 # Demos
 
 <br/><br/>
