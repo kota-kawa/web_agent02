@@ -23,6 +23,7 @@ dist/
 # Data files
 *.gif
 *.txt
+!flask_app/requirements.txt
 *.pdf
 *.csv
 *.json
