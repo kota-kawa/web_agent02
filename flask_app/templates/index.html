@@ -100,7 +100,7 @@
         }
 
         formElement.classList.add('is-sending');
-        statusElement.textContent = 'LLMに送信しています…';
+        statusElement.textContent = 'エージェントに指示を送信しています…';
         messagesElement.setAttribute('aria-busy', 'true');
 
         try {
@@ -121,7 +121,11 @@
           const data = await response.json();
           renderMessages(data.messages || []);
           promptInput.value = '';
-          statusElement.textContent = '完了しました。';
+          if (data.run_summary) {
+            statusElement.textContent = data.run_summary;
+          } else {
+            statusElement.textContent = '完了しました。';
+          }
         } catch (error) {
           statusElement.textContent = error.message;
         } finally {

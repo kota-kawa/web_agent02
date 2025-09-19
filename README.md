@@ -84,7 +84,13 @@ docker compose up --build
 
 Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900](http://localhost:7900); adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
 
-> ℹ️ The chat side currently returns demo status messages so you can wire in your own LLM or agent logic later.
+> ℹ️ The chat panel now drives the embedded browser with the real `browser-use` agent. Add your model credentials (for example `OPENAI_API_KEY=...`) and make sure the Chrome container exposes a DevTools endpoint. The Flask app will try common URLs such as `http://browser:9222`, but you can override it with `BROWSER_USE_CDP_URL` if necessary.
+
+Once the stack is up you can:
+
+* place your API keys in a local `.env` file consumed by the Flask service;
+* set `BROWSER_USE_CDP_URL` when the CDP endpoint cannot be discovered automatically;
+* adjust `AGENT_MAX_STEPS` to control how many reasoning steps the agent may take for each instruction.
 
 # Demos
 
