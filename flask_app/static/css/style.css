@@ -36,6 +36,15 @@ body {
   margin: 0;
   padding-bottom: 8px;
   border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.chat-header-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .chat-header h1 {
@@ -47,6 +56,34 @@ body {
   margin: 4px 0 0;
   font-size: 0.95rem;
   color: #4b5563;
+}
+
+.chat-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-button {
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1f2937;
+  background: #e5e7eb;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.control-button:hover,
+.control-button:focus {
+  background: #d1d5db;
+}
+
+.control-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .messages {
