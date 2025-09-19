@@ -24,7 +24,7 @@ from browser_use.agent.cloud_events import (
 from browser_use.agent.message_manager.utils import save_conversation
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
-from browser_use.llm.openai.chat import ChatOpenAI
+from browser_use.llm.google.chat import ChatGoogle
 from browser_use.tokens.service import TokenCost
 
 load_dotenv()
@@ -186,20 +186,21 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	):
 		if llm is None:
 			default_llm_name = CONFIG.DEFAULT_LLM
-			if default_llm_name:
-				try:
-					from browser_use.llm.models import get_llm_by_name
+                        if default_llm_name:
+                                try:
+                                        from browser_use.llm.models import get_llm_by_name
 
-					llm = get_llm_by_name(default_llm_name)
-				except (ImportError, ValueError) as e:
-					# Use the logger that's already imported at the top of the module
-					logger.warning(
-						f'Failed to create default LLM "{default_llm_name}": {e}. Falling back to ChatOpenAI(model="gpt-4.1-mini")'
-					)
-					llm = ChatOpenAI(model='gpt-4.1-mini')
-			else:
-				# No default LLM specified, use the original default
-				llm = ChatOpenAI(model='gpt-4.1-mini')
+                                        llm = get_llm_by_name(default_llm_name)
+                                except (ImportError, ValueError) as e:
+                                        # Use the logger that's already imported at the top of the module
+                                        logger.warning(
+                                                f'Failed to create default LLM "{default_llm_name}": {e}. '
+                                                'Falling back to ChatGoogle(model="gemini-2.5-flash")'
+                                        )
+                                        llm = ChatGoogle(model='gemini-2.5-flash')
+                        else:
+                                # No default LLM specified, use the Gemini flash model
+                                llm = ChatGoogle(model='gemini-2.5-flash')
 
 		if page_extraction_llm is None:
 			page_extraction_llm = llm
