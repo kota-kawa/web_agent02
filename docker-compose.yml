@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile.flask
     ports:
-      - '5000:5000'
+      - '5005:5005'
     environment:
       - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale
     depends_on:
