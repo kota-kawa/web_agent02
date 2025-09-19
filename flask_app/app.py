@@ -5,8 +5,10 @@ import asyncio
 import json
 import logging
 import os
+import queue
 import threading
 from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import count
 from typing import Any, Callable
@@ -14,11 +16,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from flask.typing import ResponseReturnValue
 
 from browser_use import Agent, BrowserProfile, BrowserSession
-from browser_use.agent.views import ActionResult, AgentHistoryList
+from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
+from browser_use.browser.views import BrowserStateSummary
 from browser_use.llm.google.chat import ChatGoogle
 
 load_dotenv()
@@ -49,6 +52,40 @@ app = Flask(__name__)
 app.json.ensure_ascii = False
 
 _message_sequence = count()
+
+
+class MessageBroadcaster:
+    """Simple pub/sub helper for Server-Sent Events."""
+
+    def __init__(self) -> None:
+        self._listeners: list[queue.SimpleQueue[dict[str, Any]]] = []
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> queue.SimpleQueue[dict[str, Any]]:
+        listener: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        with self._lock:
+            self._listeners.append(listener)
+        return listener
+
+    def unsubscribe(self, listener: queue.SimpleQueue[dict[str, Any]]) -> None:
+        with self._lock:
+            with suppress(ValueError):
+                self._listeners.remove(listener)
+
+    def publish(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            listeners = list(self._listeners)
+        for listener in listeners:
+            listener.put(event)
+
+    def publish_message(self, message: dict[str, Any]) -> None:
+        self.publish({'type': 'message', 'payload': message})
+
+    def publish_update(self, message: dict[str, Any]) -> None:
+        self.publish({'type': 'update', 'payload': message})
+
+    def publish_reset(self) -> None:
+        self.publish({'type': 'reset'})
 
 
 def _replace_cdp_session_cleanup(cleanup: Callable[[], None] | None) -> None:
@@ -87,12 +124,55 @@ def _make_message(role: str, content: str) -> dict[str, str | int]:
     }
 
 
-_history: list[dict[str, str | int]] = [
-    _make_message(
-        'assistant',
-        'ブラウザ操作エージェントへようこそ。GeminiのAPIキー（環境変数 GOOGLE_API_KEY または GEMINI_API_KEY）とCDP URLを設定すると、左側のチャットから自然言語でChromeを操作できます。',
-    )
-]
+def _initial_history() -> list[dict[str, str | int]]:
+    return [
+        _make_message(
+            'assistant',
+            'ブラウザ操作エージェントへようこそ。GeminiのAPIキー（環境変数 GOOGLE_API_KEY または GEMINI_API_KEY）とCDP URLを設定すると、左側のチャットから自然言語でChromeを操作できます。',
+        )
+    ]
+
+
+_history_lock = threading.Lock()
+_history: list[dict[str, str | int]] = _initial_history()
+_broadcaster = MessageBroadcaster()
+
+
+def _copy_history() -> list[dict[str, str | int]]:
+    with _history_lock:
+        return [dict(message) for message in _history]
+
+
+def _append_history_message(role: str, content: str) -> dict[str, str | int]:
+    message = _make_message(role, content)
+    with _history_lock:
+        _history.append(message)
+        stored = dict(message)
+    _broadcaster.publish_message(stored)
+    return stored
+
+
+def _update_history_message(message_id: int, new_content: str) -> dict[str, str | int] | None:
+    with _history_lock:
+        for entry in _history:
+            if entry['id'] == message_id:
+                entry['content'] = new_content
+                updated = dict(entry)
+                break
+        else:
+            return None
+    _broadcaster.publish_update(updated)
+    return updated
+
+
+def _reset_history() -> list[dict[str, str | int]]:
+    global _history, _message_sequence
+    with _history_lock:
+        _message_sequence = count()
+        _history = _initial_history()
+        snapshot = [dict(message) for message in _history]
+    _broadcaster.publish_reset()
+    return snapshot
 
 _BROWSER_URL = os.environ.get(
     'EMBED_BROWSER_URL',
@@ -214,40 +294,69 @@ def _format_result(result: ActionResult) -> str:
     return ' / '.join(segments) if segments else ''
 
 
+def _format_step_entry(index: int, step: Any) -> str:
+    lines: list[str] = [f'ステップ{index}']
+    state = getattr(step, 'state', None)
+    if state:
+        page_parts: list[str] = []
+        if getattr(state, 'title', None):
+            page_parts.append(_truncate(_compact_text(state.title), 80))
+        if getattr(state, 'url', None):
+            page_parts.append(state.url)
+        if page_parts:
+            lines.append('ページ: ' + ' / '.join(page_parts))
+
+    model_output = getattr(step, 'model_output', None)
+    if model_output:
+        action_lines = [_format_action(action) for action in model_output.action]
+        if action_lines:
+            lines.append('アクション: ' + ' / '.join(action_lines))
+        if model_output.evaluation_previous_goal:
+            lines.append(
+                '評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120)
+            )
+        if model_output.next_goal:
+            lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+
+    result_lines = [text for text in (_format_result(r) for r in getattr(step, 'result', [])) if text]
+    if result_lines:
+        lines.append('結果: ' + ' / '.join(result_lines))
+
+    return '\n'.join(lines)
+
+
 def _format_history_messages(history: AgentHistoryList) -> list[str]:
-    formatted: list[str] = []
-    for index, step in enumerate(history.history, start=1):
-        lines: list[str] = [f'ステップ{index}']
-        state = getattr(step, 'state', None)
-        if state:
-            page_parts: list[str] = []
-            if state.title:
-                page_parts.append(_truncate(_compact_text(state.title), 80))
-            if state.url:
-                page_parts.append(state.url)
-            if page_parts:
-                lines.append('ページ: ' + ' / '.join(page_parts))
+    return [_format_step_entry(index, step) for index, step in enumerate(history.history, start=1)]
 
-        if step.model_output:
-            action_lines = [_format_action(action) for action in step.model_output.action]
-            if action_lines:
-                lines.append('アクション: ' + ' / '.join(action_lines))
-            if step.model_output.evaluation_previous_goal:
-                lines.append(
-                    '評価: '
-                    + _truncate(_compact_text(step.model_output.evaluation_previous_goal), 120)
-                )
-            if step.model_output.next_goal:
-                lines.append(
-                    '次の目標: ' + _truncate(_compact_text(step.model_output.next_goal), 120)
-                )
 
-        result_lines = [text for text in (_format_result(r) for r in step.result) if text]
-        if result_lines:
-            lines.append('結果: ' + ' / '.join(result_lines))
+def _format_step_plan(
+    step_number: int,
+    state: BrowserStateSummary,
+    model_output: AgentOutput,
+) -> str:
+    lines: list[str] = [f'ステップ{step_number} 計画']
 
-        formatted.append('\n'.join(lines))
-    return formatted
+    page_parts: list[str] = []
+    if state.title:
+        page_parts.append(_truncate(_compact_text(state.title), 80))
+    if state.url:
+        page_parts.append(state.url)
+    if page_parts:
+        lines.append('ページ: ' + ' / '.join(page_parts))
+
+    action_lines = [_format_action(action) for action in model_output.action]
+    if action_lines:
+        lines.append('アクション候補: ' + ' / '.join(action_lines))
+    if model_output.evaluation_previous_goal:
+        lines.append(
+            '評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120)
+        )
+    if model_output.memory:
+        lines.append('メモリ: ' + _truncate(_compact_text(model_output.memory), 120))
+    if model_output.next_goal:
+        lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+
+    return '\n'.join(lines)
 
 
 def _summarize_history(history: AgentHistoryList) -> str:
@@ -471,6 +580,12 @@ def _resolve_cdp_url() -> str | None:
     return None
 
 
+@dataclass
+class AgentRunResult:
+    history: AgentHistoryList
+    step_message_ids: dict[int, int] = field(default_factory=dict)
+
+
 class BrowserAgentController:
     """Manage a long-lived browser session controlled by browser-use."""
 
@@ -490,11 +605,15 @@ class BrowserAgentController:
         )
         self._thread.start()
         self._lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._browser_session: BrowserSession | None = None
         self._shutdown = False
         self._logger = logging.getLogger('browser_use.flask.agent')
         self._cdp_cleanup = cdp_cleanup
         self._llm = _create_gemini_llm()
+        self._current_agent: Agent | None = None
+        self._is_running = False
+        self._paused = False
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -519,16 +638,44 @@ class BrowserAgentController:
         self._browser_session = BrowserSession(browser_profile=profile)
         return self._browser_session
 
-    async def _run_agent(self, task: str) -> AgentHistoryList:
+    async def _run_agent(self, task: str) -> AgentRunResult:
         session = await self._ensure_browser_session()
-        agent = Agent(task=task, browser_session=session, llm=self._llm)
+
+        step_message_ids: dict[int, int] = {}
+
+        def handle_new_step(
+            state_summary: BrowserStateSummary,
+            model_output: AgentOutput,
+            step_number: int,
+        ) -> None:
+            try:
+                content = _format_step_plan(step_number, state_summary, model_output)
+                message = _append_history_message('assistant', content)
+                step_message_ids[step_number] = int(message['id'])
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to broadcast step update', exc_info=True)
+
+        agent = Agent(
+            task=task,
+            browser_session=session,
+            llm=self._llm,
+            register_new_step_callback=handle_new_step,
+        )
+        with self._state_lock:
+            self._current_agent = agent
+            self._is_running = True
+            self._paused = False
         try:
             history = await agent.run(max_steps=self._max_steps)
-            return history
+            return AgentRunResult(history=history, step_message_ids=step_message_ids)
         finally:
             if session.browser_profile.keep_alive:
                 with suppress(Exception):
                     await session.stop()
+            with self._state_lock:
+                self._current_agent = None
+                self._is_running = False
+                self._paused = False
 
     async def _async_shutdown(self) -> None:
         if self._browser_session is not None:
@@ -536,7 +683,60 @@ class BrowserAgentController:
                 await self._browser_session.stop()
             self._browser_session = None
 
-    def run(self, task: str) -> AgentHistoryList:
+    def _call_in_loop(self, func: Callable[[], None]) -> None:
+        async def _invoke() -> None:
+            func()
+
+        future = asyncio.run_coroutine_threadsafe(_invoke(), self._loop)
+        future.result()
+
+    def pause(self) -> None:
+        with self._state_lock:
+            agent = self._current_agent
+            running = self._is_running
+            already_paused = self._paused
+
+        if not agent or not running:
+            raise AgentControllerError('エージェントは実行されていません。')
+        if already_paused:
+            raise AgentControllerError('エージェントは既に一時停止中です。')
+
+        try:
+            self._call_in_loop(agent.pause)
+        except Exception as exc:  # noqa: BLE001
+            raise AgentControllerError(f'一時停止に失敗しました: {exc}') from exc
+
+        with self._state_lock:
+            self._paused = True
+
+    def resume(self) -> None:
+        with self._state_lock:
+            agent = self._current_agent
+            running = self._is_running
+            paused = self._paused
+
+        if not agent or not running:
+            raise AgentControllerError('エージェントは実行されていません。')
+        if not paused:
+            raise AgentControllerError('エージェントは一時停止状態ではありません。')
+
+        try:
+            self._call_in_loop(agent.resume)
+        except Exception as exc:  # noqa: BLE001
+            raise AgentControllerError(f'再開に失敗しました: {exc}') from exc
+
+        with self._state_lock:
+            self._paused = False
+
+    def is_running(self) -> bool:
+        with self._state_lock:
+            return self._is_running
+
+    def is_paused(self) -> bool:
+        with self._state_lock:
+            return self._paused
+
+    def run(self, task: str) -> AgentRunResult:
         if self._shutdown:
             raise AgentControllerError('エージェントコントローラーは停止済みです。')
 
@@ -602,6 +802,12 @@ def _get_agent_controller() -> BrowserAgentController:
     return _AGENT_CONTROLLER
 
 
+def _get_existing_controller() -> BrowserAgentController:
+    if _AGENT_CONTROLLER is None:
+        raise AgentControllerError('エージェントはまだ初期化されていません。')
+    return _AGENT_CONTROLLER
+
+
 @app.route('/')
 def index() -> str:
     return render_template('index.html', browser_url=_BROWSER_URL)
@@ -609,7 +815,25 @@ def index() -> str:
 
 @app.get('/api/history')
 def history() -> ResponseReturnValue:
-    return jsonify({'messages': _history}), 200
+    return jsonify({'messages': _copy_history()}), 200
+
+
+@app.get('/api/stream')
+def stream() -> ResponseReturnValue:
+    listener = _broadcaster.subscribe()
+
+    def event_stream() -> Any:
+        try:
+            while True:
+                event = listener.get()
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            _broadcaster.unsubscribe(listener)
+
+    headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    return Response(stream_with_context(event_stream()), mimetype='text/event-stream', headers=headers)
 
 
 @app.post('/api/chat')
@@ -620,30 +844,72 @@ def chat() -> ResponseReturnValue:
     if not prompt:
         return jsonify({'error': 'プロンプトを入力してください。'}), 400
 
-    _history.append(_make_message('user', prompt))
+    _append_history_message('user', prompt)
 
     try:
         controller = _get_agent_controller()
-        agent_history = controller.run(prompt)
+        run_result = controller.run(prompt)
+        agent_history = run_result.history
     except AgentControllerError as exc:
         message = f'エージェントの実行に失敗しました: {exc}'
         logger.warning(message)
-        _history.append(_make_message('assistant', message))
-        return jsonify({'messages': _history, 'run_summary': message}), 200
+        _append_history_message('assistant', message)
+        return jsonify({'messages': _copy_history(), 'run_summary': message}), 200
     except Exception as exc:  # noqa: BLE001
         logger.exception('Unexpected error while running browser agent')
         error_message = f'エージェントの実行中に予期しないエラーが発生しました: {exc}'
-        _history.append(_make_message('assistant', error_message))
-        return jsonify({'messages': _history, 'run_summary': error_message}), 200
+        _append_history_message('assistant', error_message)
+        return jsonify({'messages': _copy_history(), 'run_summary': error_message}), 200
 
     step_messages = _format_history_messages(agent_history)
-    for content in step_messages:
-        _history.append(_make_message('assistant', content))
+    for index, content in enumerate(step_messages, start=1):
+        message_id = run_result.step_message_ids.get(index)
+        if message_id is not None:
+            _update_history_message(message_id, content)
+        else:
+            appended = _append_history_message('assistant', content)
+            run_result.step_message_ids[index] = int(appended['id'])
 
     summary_message = _summarize_history(agent_history)
-    _history.append(_make_message('assistant', summary_message))
+    _append_history_message('assistant', summary_message)
 
-    return jsonify({'messages': _history, 'run_summary': summary_message}), 200
+    return jsonify({'messages': _copy_history(), 'run_summary': summary_message}), 200
+
+
+@app.post('/api/reset')
+def reset_conversation() -> ResponseReturnValue:
+    try:
+        snapshot = _reset_history()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Failed to reset history')
+        return jsonify({'error': f'履歴のリセットに失敗しました: {exc}'}), 500
+    return jsonify({'messages': snapshot}), 200
+
+
+@app.post('/api/pause')
+def pause_agent() -> ResponseReturnValue:
+    try:
+        controller = _get_existing_controller()
+        controller.pause()
+    except AgentControllerError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Failed to pause agent')
+        return jsonify({'error': f'一時停止に失敗しました: {exc}'}), 500
+    return jsonify({'status': 'paused'}), 200
+
+
+@app.post('/api/resume')
+def resume_agent() -> ResponseReturnValue:
+    try:
+        controller = _get_existing_controller()
+        controller.resume()
+    except AgentControllerError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Failed to resume agent')
+        return jsonify({'error': f'再開に失敗しました: {exc}'}), 500
+    return jsonify({'status': 'resumed'}), 200
 
 
 if __name__ == '__main__':

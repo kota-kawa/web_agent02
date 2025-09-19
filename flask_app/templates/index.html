@@ -10,8 +10,18 @@
     <div class="layout">
       <section class="chat-pane" aria-label="チャット領域">
         <header class="chat-header">
-          <h1>ブラウザ制御チャット</h1>
-          <p>左側でLLMからのフィードバックを確認し、指示を送信できます。</p>
+          <div class="chat-header-text">
+            <h1>ブラウザ制御チャット</h1>
+            <p>左側でLLMからのフィードバックを確認し、指示を送信できます。</p>
+          </div>
+          <div class="chat-controls" role="group" aria-label="チャット操作">
+            <button type="button" id="pause-button" class="control-button" disabled>
+              一時停止
+            </button>
+            <button type="button" id="reset-button" class="control-button">
+              履歴リセット
+            </button>
+          </div>
         </header>
         <div id="messages" class="messages" aria-live="polite" aria-busy="false"></div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -41,10 +51,18 @@
       const statusElement = document.getElementById('status');
       const formElement = document.getElementById('prompt-form');
       const promptInput = document.getElementById('prompt-input');
+      const pauseButton = document.getElementById('pause-button');
+      const resetButton = document.getElementById('reset-button');
+
+      let conversation = [];
+      let eventSource;
+      let isRunning = false;
+      let isPaused = false;
 
       function createMessageElement(message) {
         const wrapper = document.createElement('div');
         wrapper.className = `message ${message.role}`;
+        wrapper.dataset.id = message.id;
 
         const label = document.createElement('div');
         label.className = 'label';
@@ -70,12 +88,62 @@
         return wrapper;
       }
 
+      function updateMessageElement(element, message) {
+        const bubble = element.querySelector('.bubble');
+        if (bubble) {
+          bubble.textContent = message.content;
+        }
+        const meta = element.querySelector('.meta');
+        if (meta) {
+          const timestamp = new Date(message.timestamp);
+          if (!Number.isNaN(timestamp.getTime())) {
+            meta.textContent = timestamp.toLocaleTimeString('ja-JP', {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+          }
+        }
+      }
+
       function renderMessages(messages) {
         messagesElement.innerHTML = '';
         messages.forEach((message) => {
           messagesElement.appendChild(createMessageElement(message));
         });
         messagesElement.scrollTop = messagesElement.scrollHeight;
+      }
+
+      function appendOrUpdateMessage(message) {
+        if (!message || typeof message.id === 'undefined') {
+          return;
+        }
+        const existingIndex = conversation.findIndex((item) => item.id === message.id);
+        if (existingIndex >= 0) {
+          conversation[existingIndex] = message;
+          const element = messagesElement.querySelector(`[data-id="${message.id}"]`);
+          if (element) {
+            updateMessageElement(element, message);
+          } else {
+            renderMessages(conversation);
+          }
+        } else {
+          conversation.push(message);
+          messagesElement.appendChild(createMessageElement(message));
+          messagesElement.scrollTop = messagesElement.scrollHeight;
+        }
+      }
+
+      function updatePauseButtonState() {
+        if (!pauseButton) {
+          return;
+        }
+        if (!isRunning) {
+          pauseButton.disabled = true;
+          pauseButton.textContent = '一時停止';
+        } else {
+          pauseButton.disabled = false;
+          pauseButton.textContent = isPaused ? '再開' : '一時停止';
+        }
       }
 
       async function loadHistory() {
@@ -85,10 +153,44 @@
             throw new Error('履歴の取得に失敗しました。');
           }
           const data = await response.json();
-          renderMessages(data.messages || []);
+          conversation = data.messages || [];
+          renderMessages(conversation);
         } catch (error) {
           statusElement.textContent = error.message;
         }
+      }
+
+      function handleResetEvent() {
+        conversation = [];
+        renderMessages(conversation);
+        statusElement.textContent = '履歴をリセットしました。';
+        loadHistory();
+      }
+
+      function setupEventStream() {
+        if (eventSource) {
+          eventSource.close();
+        }
+        eventSource = new EventSource('/api/stream');
+        eventSource.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'message' && payload.payload) {
+              appendOrUpdateMessage(payload.payload);
+            } else if (payload.type === 'update' && payload.payload) {
+              appendOrUpdateMessage(payload.payload);
+            } else if (payload.type === 'reset') {
+              handleResetEvent();
+            }
+          } catch (error) {
+            console.error('ストリームの処理に失敗しました', error);
+          }
+        };
+        eventSource.onerror = () => {
+          statusElement.textContent = 'ストリーム接続が切断されました。再接続を試みています…';
+          eventSource.close();
+          setTimeout(setupEventStream, 2000);
+        };
       }
 
       formElement.addEventListener('submit', async (event) => {
@@ -102,6 +204,9 @@
         formElement.classList.add('is-sending');
         statusElement.textContent = 'エージェントに指示を送信しています…';
         messagesElement.setAttribute('aria-busy', 'true');
+        isRunning = true;
+        isPaused = false;
+        updatePauseButtonState();
 
         try {
           const response = await fetch('/api/chat', {
@@ -112,29 +217,86 @@
             body: JSON.stringify({ prompt }),
           });
 
+          const data = await response.json().catch(() => ({}));
           if (!response.ok) {
-            const errorPayload = await response.json().catch(() => ({ error: '' }));
-            const message = errorPayload.error || 'LLMへの送信に失敗しました。';
+            const message = data.error || 'LLMへの送信に失敗しました。';
             throw new Error(message);
           }
 
-          const data = await response.json();
-          renderMessages(data.messages || []);
-          promptInput.value = '';
-          if (data.run_summary) {
-            statusElement.textContent = data.run_summary;
-          } else {
-            statusElement.textContent = '完了しました。';
+          if (Array.isArray(data.messages)) {
+            conversation = data.messages;
+            renderMessages(conversation);
           }
+          promptInput.value = '';
+          statusElement.textContent = data.run_summary || '完了しました。';
         } catch (error) {
-          statusElement.textContent = error.message;
+          statusElement.textContent = error.message || 'エージェントへの送信に失敗しました。';
         } finally {
           formElement.classList.remove('is-sending');
           messagesElement.setAttribute('aria-busy', 'false');
+          isRunning = false;
+          isPaused = false;
+          updatePauseButtonState();
         }
       });
 
+      if (pauseButton) {
+        pauseButton.addEventListener('click', async () => {
+          if (pauseButton.disabled) {
+            return;
+          }
+          pauseButton.disabled = true;
+          const endpoint = isPaused ? '/api/resume' : '/api/pause';
+          try {
+            const response = await fetch(endpoint, { method: 'POST' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const message = data.error || (isPaused ? '再開に失敗しました。' : '一時停止に失敗しました。');
+              throw new Error(message);
+            }
+            isPaused = !isPaused;
+            statusElement.textContent = isPaused
+              ? 'エージェントを一時停止しました。'
+              : 'エージェントを再開しました。';
+          } catch (error) {
+            statusElement.textContent = error.message || '操作に失敗しました。';
+          } finally {
+            updatePauseButtonState();
+          }
+        });
+      }
+
+      if (resetButton) {
+        resetButton.addEventListener('click', async () => {
+          const confirmed = window.confirm('会話履歴をリセットしますか？');
+          if (!confirmed) {
+            return;
+          }
+          resetButton.disabled = true;
+          try {
+            const response = await fetch('/api/reset', { method: 'POST' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const message = data.error || '履歴のリセットに失敗しました。';
+              throw new Error(message);
+            }
+            conversation = data.messages || [];
+            renderMessages(conversation);
+            statusElement.textContent = '履歴をリセットしました。';
+            isRunning = false;
+            isPaused = false;
+            updatePauseButtonState();
+          } catch (error) {
+            statusElement.textContent = error.message || '履歴のリセットに失敗しました。';
+          } finally {
+            resetButton.disabled = false;
+          }
+        });
+      }
+
+      setupEventStream();
       loadHistory();
+      updatePauseButtonState();
     </script>
   </body>
 </html>
