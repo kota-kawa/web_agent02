@@ -9,7 +9,7 @@ services:
       - '5005:5005'
     environment:
       - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale
-      - GEMINI_API_KEY=sample-gemini-key-1234567890
+      - GEMINI_API_KEY=AIzaSyAeLbzEtn0vF6XBAAiD6gTHDNpvpHqKnoE
     depends_on:
       - browser
 
