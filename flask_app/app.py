@@ -11,7 +11,7 @@ from datetime import datetime
 from itertools import count
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -236,6 +236,104 @@ def _probe_cdp_candidate(base_url: str) -> str | None:
     return None
 
 
+def _extract_cdp_url(capabilities: dict[str, Any]) -> str | None:
+    for key in ('se:cdp', 'se:cdpUrl', 'se:cdpURL'):
+        raw_value = capabilities.get(key)
+        if isinstance(raw_value, str):
+            trimmed = raw_value.strip()
+            if trimmed:
+                return trimmed
+    return None
+
+
+def _cleanup_webdriver_session(base_endpoint: str, session_id: str) -> None:
+    delete_url = f'{base_endpoint}/session/{session_id}'
+    request = Request(delete_url, method='DELETE')
+    try:
+        with urlopen(request, timeout=_CDP_PROBE_TIMEOUT):
+            pass
+    except (URLError, HTTPError, TimeoutError, OSError):
+        logger.debug('Failed to clean up temporary WebDriver session %s', session_id, exc_info=True)
+
+
+def _probe_webdriver_endpoint(base_endpoint: str) -> str | None:
+    session_url = f'{base_endpoint}/session'
+    payload = json.dumps({
+        'capabilities': {
+            'alwaysMatch': {
+                'browserName': 'chrome',
+            }
+        }
+    }).encode('utf-8')
+    request = Request(
+        session_url,
+        data=payload,
+        headers={'Content-Type': 'application/json'},
+    )
+
+    session_id: str | None = None
+    capabilities: dict[str, Any] | None = None
+
+    try:
+        with urlopen(request, timeout=_CDP_PROBE_TIMEOUT) as response:
+            if response.status not in (200, 201):
+                return None
+            try:
+                data: Any = json.load(response)
+            except json.JSONDecodeError:
+                return None
+    except (URLError, HTTPError, TimeoutError, OSError):
+        return None
+    else:
+        if isinstance(data, dict):
+            value = data.get('value')
+            if isinstance(value, dict):
+                maybe_caps = value.get('capabilities')
+                if isinstance(maybe_caps, dict):
+                    capabilities = maybe_caps
+                raw_session = value.get('sessionId')
+                if isinstance(raw_session, str) and raw_session.strip():
+                    session_id = raw_session.strip()
+            if capabilities is None:
+                maybe_caps = data.get('capabilities')
+                if isinstance(maybe_caps, dict):
+                    capabilities = maybe_caps
+            if not session_id:
+                raw_session = data.get('sessionId')
+                if isinstance(raw_session, str) and raw_session.strip():
+                    session_id = raw_session.strip()
+        cdp_url = _extract_cdp_url(capabilities) if capabilities else None
+    finally:
+        if session_id:
+            _cleanup_webdriver_session(base_endpoint, session_id)
+
+    return cdp_url
+
+
+def _probe_cdp_via_webdriver(base_url: str) -> str | None:
+    normalized = base_url.strip()
+    if not normalized or not normalized.lower().startswith(('http://', 'https://')):
+        return None
+
+    normalized = normalized.rstrip('/')
+    endpoints = []
+    if normalized:
+        endpoints.append(normalized)
+        if not normalized.endswith('/wd/hub'):
+            endpoints.append(f'{normalized}/wd/hub')
+
+    seen: set[str] = set()
+    for endpoint in endpoints:
+        endpoint = endpoint.rstrip('/')
+        if not endpoint or endpoint in seen:
+            continue
+        seen.add(endpoint)
+        ws_url = _probe_webdriver_endpoint(endpoint)
+        if ws_url:
+            return ws_url
+    return None
+
+
 def _resolve_cdp_url() -> str | None:
     explicit_keys = ('BROWSER_USE_CDP_URL', 'CDP_URL', 'REMOTE_CDP_URL')
     for key in explicit_keys:
@@ -251,16 +349,25 @@ def _resolve_cdp_url() -> str | None:
         candidates = [
             'http://browser:9222',
             'http://browser:4444',
+            'http://browser:4444/wd/hub',
             'http://localhost:9222',
             'http://localhost:4444',
+            'http://localhost:4444/wd/hub',
             'http://127.0.0.1:9222',
             'http://127.0.0.1:4444',
+            'http://127.0.0.1:4444/wd/hub',
         ]
 
     for candidate in candidates:
         ws_url = _probe_cdp_candidate(candidate)
         if ws_url:
             logger.info('Detected Chrome DevTools endpoint at %s', candidate)
+            return ws_url
+
+    for candidate in candidates:
+        ws_url = _probe_cdp_via_webdriver(candidate)
+        if ws_url:
+            logger.info('Detected Chrome DevTools endpoint via WebDriver at %s', candidate)
             return ws_url
 
     logger.warning('Chrome DevToolsのCDP URLを自動検出できませんでした。環境変数BROWSER_USE_CDP_URLを設定してください。')
