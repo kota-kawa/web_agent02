@@ -195,6 +195,34 @@ def _get_env_trimmed(name: str) -> str | None:
     return trimmed or None
 
 
+def _normalize_start_url(value: str | None) -> str | None:
+    """Normalize a configured start URL for the embedded browser."""
+
+    if not value:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    lowered = normalized.lower()
+    if lowered in {'none', 'off', 'false'}:
+        return None
+
+    if normalized.startswith('//'):
+        normalized = normalized[2:]
+
+    if '://' not in normalized and not normalized.startswith(('about:', 'chrome:', 'file:')):
+        normalized = f'https://{normalized}'
+
+    return normalized
+
+
+_DEFAULT_START_URL = _normalize_start_url(
+    _get_env_trimmed('BROWSER_DEFAULT_START_URL'),
+) or 'https://www.yahoo.co.jp'
+
+
 def _resolve_gemini_api_key() -> str:
     for key in ('GOOGLE_API_KEY', 'GEMINI_API_KEY'):
         value = _get_env_trimmed(key)
@@ -661,6 +689,18 @@ class BrowserAgentController:
             llm=self._llm,
             register_new_step_callback=handle_new_step,
         )
+        if _DEFAULT_START_URL and not agent.initial_actions:
+            try:
+                agent.initial_url = _DEFAULT_START_URL
+                agent.initial_actions = agent._convert_initial_actions(
+                    [{'go_to_url': {'url': _DEFAULT_START_URL, 'new_tab': False}}]
+                )
+            except Exception:  # noqa: BLE001
+                self._logger.debug(
+                    'Failed to apply default start URL %s',
+                    _DEFAULT_START_URL,
+                    exc_info=True,
+                )
         with self._state_lock:
             self._current_agent = agent
             self._is_running = True
