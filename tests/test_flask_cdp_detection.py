@@ -13,6 +13,17 @@ import pytest
 from flask_app import app as flask_app_module
 
 
+@pytest.fixture(autouse=True)
+def reset_cdp_cleanup() -> None:
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    if cleanup:
+        cleanup()
+    yield
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    if cleanup:
+        cleanup()
+
+
 class FakeResponse(io.BytesIO):
     def __init__(self, payload: bytes, status: int = 200) -> None:
         super().__init__(payload)
@@ -39,6 +50,7 @@ def test_resolve_cdp_url_prefers_explicit_env(monkeypatch: pytest.MonkeyPatch) -
     result = flask_app_module._resolve_cdp_url()
 
     assert result == 'ws://explicit-host'
+    assert flask_app_module._consume_cdp_session_cleanup() is None
 
 
 def test_resolve_cdp_url_uses_webdriver_probe(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,7 +62,10 @@ def test_resolve_cdp_url_uses_webdriver_probe(monkeypatch: pytest.MonkeyPatch) -
 
     def fake_webdriver_probe(candidate: str) -> str | None:
         seen.append(candidate)
-        return 'ws://via-webdriver' if candidate == 'http://browser:4444' else None
+        if candidate == 'http://browser:4444':
+            flask_app_module._replace_cdp_session_cleanup(lambda: None)
+            return 'ws://via-webdriver'
+        return None
 
     monkeypatch.setattr(flask_app_module, '_probe_cdp_via_webdriver', fake_webdriver_probe)
 
@@ -58,6 +73,9 @@ def test_resolve_cdp_url_uses_webdriver_probe(monkeypatch: pytest.MonkeyPatch) -
 
     assert result == 'ws://via-webdriver'
     assert 'http://browser:4444' in seen
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    assert cleanup is not None
+    cleanup()
 
 
 def test_probe_cdp_via_webdriver_parses_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,5 +107,17 @@ def test_probe_cdp_via_webdriver_parses_response(monkeypatch: pytest.MonkeyPatch
 
     assert result == 'ws://example.devtools'
     assert calls[0][0] == 'POST'
+
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    assert callable(cleanup)
+    assert len(calls) == 1
+
+    cleanup()
+
+    assert len(calls) == 2
     assert calls[1][0] == 'DELETE'
     assert calls[1][1].endswith('/session/abc123')
+
+    cleanup()
+
+    assert len(calls) == 2

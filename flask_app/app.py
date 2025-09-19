@@ -9,7 +9,7 @@ import threading
 from contextlib import suppress
 from datetime import datetime
 from itertools import count
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -42,10 +42,34 @@ def _env_int(name: str, default: int) -> int:
 _AGENT_MAX_STEPS = _env_int('AGENT_MAX_STEPS', 30)
 _CDP_PROBE_TIMEOUT = float(os.environ.get('BROWSER_USE_CDP_TIMEOUT', '2.0'))
 
+_CDP_SESSION_CLEANUP: Callable[[], None] | None = None
+
 app = Flask(__name__)
 app.json.ensure_ascii = False
 
 _message_sequence = count()
+
+
+def _replace_cdp_session_cleanup(cleanup: Callable[[], None] | None) -> None:
+    """Store a cleanup callback, closing any previously registered session."""
+
+    global _CDP_SESSION_CLEANUP
+
+    previous = _CDP_SESSION_CLEANUP
+    _CDP_SESSION_CLEANUP = cleanup
+    if previous and previous is not cleanup:
+        with suppress(Exception):
+            previous()
+
+
+def _consume_cdp_session_cleanup() -> Callable[[], None] | None:
+    """Return and clear the currently registered CDP cleanup callback."""
+
+    global _CDP_SESSION_CLEANUP
+
+    cleanup = _CDP_SESSION_CLEANUP
+    _CDP_SESSION_CLEANUP = None
+    return cleanup
 
 
 def _utc_timestamp() -> str:
@@ -226,13 +250,19 @@ def _probe_cdp_candidate(base_url: str) -> str | None:
                 or payload.get('websocketUrl')
             )
             if ws_url:
-                return ws_url
+                candidate_url = ws_url.strip()
+                if candidate_url:
+                    _replace_cdp_session_cleanup(None)
+                    return candidate_url
         elif isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict):
                     ws_url = item.get('webSocketDebuggerUrl')
                     if ws_url:
-                        return ws_url
+                        candidate_url = ws_url.strip()
+                        if candidate_url:
+                            _replace_cdp_session_cleanup(None)
+                            return candidate_url
     return None
 
 
@@ -284,28 +314,47 @@ def _probe_webdriver_endpoint(base_endpoint: str) -> str | None:
                 return None
     except (URLError, HTTPError, TimeoutError, OSError):
         return None
-    else:
-        if isinstance(data, dict):
-            value = data.get('value')
-            if isinstance(value, dict):
-                maybe_caps = value.get('capabilities')
-                if isinstance(maybe_caps, dict):
-                    capabilities = maybe_caps
-                raw_session = value.get('sessionId')
-                if isinstance(raw_session, str) and raw_session.strip():
-                    session_id = raw_session.strip()
-            if capabilities is None:
-                maybe_caps = data.get('capabilities')
-                if isinstance(maybe_caps, dict):
-                    capabilities = maybe_caps
-            if not session_id:
-                raw_session = data.get('sessionId')
-                if isinstance(raw_session, str) and raw_session.strip():
-                    session_id = raw_session.strip()
-        cdp_url = _extract_cdp_url(capabilities) if capabilities else None
-    finally:
+
+    if isinstance(data, dict):
+        value = data.get('value')
+        if isinstance(value, dict):
+            maybe_caps = value.get('capabilities')
+            if isinstance(maybe_caps, dict):
+                capabilities = maybe_caps
+            raw_session = value.get('sessionId')
+            if isinstance(raw_session, str) and raw_session.strip():
+                session_id = raw_session.strip()
+        if capabilities is None:
+            maybe_caps = data.get('capabilities')
+            if isinstance(maybe_caps, dict):
+                capabilities = maybe_caps
+        if not session_id:
+            raw_session = data.get('sessionId')
+            if isinstance(raw_session, str) and raw_session.strip():
+                session_id = raw_session.strip()
+
+    cdp_url = _extract_cdp_url(capabilities) if capabilities else None
+    if cdp_url:
+        cdp_url = cdp_url.strip()
+
+    if not cdp_url:
         if session_id:
             _cleanup_webdriver_session(base_endpoint, session_id)
+        return None
+
+    if session_id:
+        cleaned = False
+
+        def cleanup_session() -> None:
+            nonlocal cleaned
+            if cleaned:
+                return
+            cleaned = True
+            _cleanup_webdriver_session(base_endpoint, session_id)
+
+        _replace_cdp_session_cleanup(cleanup_session)
+    else:
+        _replace_cdp_session_cleanup(None)
 
     return cdp_url
 
@@ -340,6 +389,7 @@ def _resolve_cdp_url() -> str | None:
         value = os.environ.get(key)
         if value:
             logger.info('Using CDP URL from %s', key)
+            _replace_cdp_session_cleanup(None)
             return value.strip()
 
     candidate_env = os.environ.get('BROWSER_USE_CDP_CANDIDATES')
@@ -377,7 +427,12 @@ def _resolve_cdp_url() -> str | None:
 class BrowserAgentController:
     """Manage a long-lived browser session controlled by browser-use."""
 
-    def __init__(self, cdp_url: str | None, max_steps: int) -> None:
+    def __init__(
+        self,
+        cdp_url: str | None,
+        max_steps: int,
+        cdp_cleanup: Callable[[], None] | None = None,
+    ) -> None:
         self._cdp_url = cdp_url
         self._max_steps = max_steps
         self._loop = asyncio.new_event_loop()
@@ -391,6 +446,7 @@ class BrowserAgentController:
         self._browser_session: BrowserSession | None = None
         self._shutdown = False
         self._logger = logging.getLogger('browser_use.flask.agent')
+        self._cdp_cleanup = cdp_cleanup
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -462,6 +518,12 @@ class BrowserAgentController:
         if self._thread.is_alive():
             self._thread.join(timeout=2)
 
+        if self._cdp_cleanup:
+            try:
+                self._cdp_cleanup()
+            finally:
+                self._cdp_cleanup = None
+
 
 _AGENT_CONTROLLER: BrowserAgentController | None = None
 
@@ -470,7 +532,25 @@ def _get_agent_controller() -> BrowserAgentController:
     global _AGENT_CONTROLLER
     if _AGENT_CONTROLLER is None:
         cdp_url = _resolve_cdp_url()
-        _AGENT_CONTROLLER = BrowserAgentController(cdp_url=cdp_url, max_steps=_AGENT_MAX_STEPS)
+        cleanup = _consume_cdp_session_cleanup()
+        if not cdp_url:
+            if cleanup:
+                with suppress(Exception):
+                    cleanup()
+            raise AgentControllerError(
+                'Chrome DevToolsのCDP URLが検出できませんでした。BROWSER_USE_CDP_URL を設定してください。'
+            )
+        try:
+            _AGENT_CONTROLLER = BrowserAgentController(
+                cdp_url=cdp_url,
+                max_steps=_AGENT_MAX_STEPS,
+                cdp_cleanup=cleanup,
+            )
+        except Exception:
+            if cleanup:
+                with suppress(Exception):
+                    cleanup()
+            raise
     return _AGENT_CONTROLLER
 
 
