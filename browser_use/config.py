@@ -160,8 +160,8 @@ class OldConfig:
 		return os.getenv('SKIP_LLM_API_KEY_VERIFICATION', 'false').lower()[:1] in 'ty1'
 
 	@property
-	def DEFAULT_LLM(self) -> str:
-		return os.getenv('DEFAULT_LLM', '')
+        def DEFAULT_LLM(self) -> str:
+                return os.getenv('DEFAULT_LLM', 'google_gemini_2_5_flash')
 
 	# Runtime hints
 	@property
@@ -207,7 +207,7 @@ class FlatEnvConfig(BaseSettings):
 	AZURE_OPENAI_ENDPOINT: str = Field(default='')
 	AZURE_OPENAI_KEY: str = Field(default='')
 	SKIP_LLM_API_KEY_VERIFICATION: bool = Field(default=False)
-	DEFAULT_LLM: str = Field(default='')
+        DEFAULT_LLM: str = Field(default='google_gemini_2_5_flash')
 
 	# Runtime hints
 	IN_DOCKER: bool | None = Field(default=None)
@@ -287,7 +287,12 @@ def create_default_config() -> DBStyleConfigJSON:
 	new_config.browser_profile[profile_id] = BrowserProfileEntry(id=profile_id, default=True, headless=False, user_data_dir=None)
 
 	# Create default LLM entry
-	new_config.llm[llm_id] = LLMEntry(id=llm_id, default=True, model='gpt-4o', api_key='your-openai-api-key-here')
+        new_config.llm[llm_id] = LLMEntry(
+                id=llm_id,
+                default=True,
+                model='gemini-2.5-flash',
+                api_key='your-google-api-key-here',
+        )
 
 	# Create default agent entry
 	new_config.agent[agent_id] = AgentEntry(id=agent_id, default=True)
