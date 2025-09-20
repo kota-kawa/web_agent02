@@ -83,6 +83,36 @@ body::before {
   z-index: -1;
 }
 
+.chat-pane__content {
+  --_scrollbar-offset: clamp(6px, 1vw, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2.2vw, 22px);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--_scrollbar-offset);
+  padding-bottom: clamp(12px, 1.6vw, 20px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
+  scroll-behavior: smooth;
+  scroll-padding-bottom: clamp(12px, 1.6vw, 20px);
+  scrollbar-gutter: stable both-edges;
+}
+
+.chat-pane__content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-pane__content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+}
+
+.chat-pane__content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .chat-body {
   display: flex;
   flex-direction: column;

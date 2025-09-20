@@ -15,56 +15,58 @@
   <body>
     <main class="layout">
       <section class="chat-pane" aria-label="チャット領域">
-        <header class="chat-header">
-          <div class="chat-header-text">
-            <p class="chat-header-eyebrow">Browser-use × LLM</p>
-            <h1>ブラウザ制御チャット</h1>
+        <div class="chat-pane__content">
+          <header class="chat-header">
+            <div class="chat-header-text">
+              <p class="chat-header-eyebrow">Browser-use × LLM</p>
+              <h1>ブラウザ制御チャット</h1>
+              <p>
+                左側で会話を進めながら、右側のブラウザにリアルタイムで操作内容が反映されます。
+              </p>
+            </div>
+            <div class="chat-controls" role="group" aria-label="チャット操作">
+              <button
+                type="button"
+                id="pause-button"
+                class="control-button control-button--primary"
+                disabled
+              >
+                一時停止
+              </button>
+              <button type="button" id="reset-button" class="control-button control-button--ghost">
+                履歴リセット
+              </button>
+            </div>
+          </header>
+          <div class="chat-summary">
+            <span class="chat-summary-badge">リアルタイム実験環境</span>
             <p>
-              左側で会話を進めながら、右側のブラウザにリアルタイムで操作内容が反映されます。
+              Gemini APIキーなどの設定が完了していれば、
+              <strong>自然言語の指示</strong>だけでブラウザ操作を自動化できます。
             </p>
           </div>
-          <div class="chat-controls" role="group" aria-label="チャット操作">
-            <button
-              type="button"
-              id="pause-button"
-              class="control-button control-button--primary"
-              disabled
-            >
-              一時停止
-            </button>
-            <button type="button" id="reset-button" class="control-button control-button--ghost">
-              履歴リセット
-            </button>
-          </div>
-        </header>
-        <div class="chat-summary">
-          <span class="chat-summary-badge">リアルタイム実験環境</span>
-          <p>
-            Gemini APIキーなどの設定が完了していれば、
-            <strong>自然言語の指示</strong>だけでブラウザ操作を自動化できます。
-          </p>
-        </div>
-        <div class="chat-body">
-          <div class="status-bar">
-            <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
-            <div
-              id="connection-indicator"
-              class="connection-indicator"
-              role="status"
-              aria-live="polite"
-              data-state="idle"
-            >
-              <span class="dot" aria-hidden="true"></span>
-              <span class="text">接続を待機しています</span>
+          <div class="chat-body">
+            <div class="status-bar">
+              <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
+              <div
+                id="connection-indicator"
+                class="connection-indicator"
+                role="status"
+                aria-live="polite"
+                data-state="idle"
+              >
+                <span class="dot" aria-hidden="true"></span>
+                <span class="text">接続を待機しています</span>
+              </div>
             </div>
+            <div
+              id="messages"
+              class="messages"
+              aria-live="polite"
+              aria-busy="false"
+              data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
+            ></div>
           </div>
-          <div
-            id="messages"
-            class="messages"
-            aria-live="polite"
-            aria-busy="false"
-            data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
-          ></div>
         </div>
         <form id="prompt-form" class="prompt-form" autocomplete="off">
           <label for="prompt-input" class="sr-only">プロンプト</label>
