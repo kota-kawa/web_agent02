@@ -186,21 +186,21 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	):
 		if llm is None:
 			default_llm_name = CONFIG.DEFAULT_LLM
-                        if default_llm_name:
-                                try:
-                                        from browser_use.llm.models import get_llm_by_name
+			if default_llm_name:
+				try:
+					from browser_use.llm.models import get_llm_by_name
 
-                                        llm = get_llm_by_name(default_llm_name)
-                                except (ImportError, ValueError) as e:
-                                        # Use the logger that's already imported at the top of the module
-                                        logger.warning(
-                                                f'Failed to create default LLM "{default_llm_name}": {e}. '
-                                                'Falling back to ChatGoogle(model="gemini-2.5-flash")'
-                                        )
-                                        llm = ChatGoogle(model='gemini-2.5-flash')
-                        else:
-                                # No default LLM specified, use the Gemini flash model
-                                llm = ChatGoogle(model='gemini-2.5-flash')
+					llm = get_llm_by_name(default_llm_name)
+				except (ImportError, ValueError) as e:
+					# Use the logger that's already imported at the top of the module
+					logger.warning(
+						f'Failed to create default LLM "{default_llm_name}": {e}. '
+						'Falling back to ChatGoogle(model="gemini-2.5-flash")'
+					)
+					llm = ChatGoogle(model='gemini-2.5-flash')
+			else:
+				# No default LLM specified, use the Gemini flash model
+				llm = ChatGoogle(model='gemini-2.5-flash')
 
 		if page_extraction_llm is None:
 			page_extraction_llm = llm
