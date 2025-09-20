@@ -29,7 +29,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  padding: clamp(16px, 4vw, 36px);
+  padding: clamp(16px, 2.5vw, 28px);
   font-family: inherit;
   line-height: 1.6;
   color: var(--text-base);
@@ -51,11 +51,11 @@ body::before {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  gap: clamp(18px, 3vw, 28px);
-  width: min(1380px, 100%);
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: clamp(16px, 2.4vw, 26px);
+  width: min(1680px, 100%);
   margin: 0 auto;
-  height: calc(100vh - clamp(40px, 6vw, 72px));
+  height: calc(100vh - clamp(32px, 5vw, 60px));
   min-height: 640px;
 }
 
@@ -306,13 +306,17 @@ button:not(:disabled) {
 .messages {
   position: relative;
   flex: 1 1 auto;
-  min-height: 0;
-  padding: 6px 6px 6px 2px;
+  min-height: clamp(200px, 38vh, 420px);
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
   scroll-behavior: smooth;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: var(--shadow-soft);
 }
 
 .messages.is-empty::before {
@@ -344,8 +348,8 @@ button:not(:disabled) {
 .messages.is-busy::after {
   content: '';
   position: absolute;
-  inset: 8px 0 8px 0;
-  border-radius: var(--radius-md);
+  inset: 12px;
+  border-radius: calc(var(--radius-md) - 6px);
   background: linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(59, 130, 246, 0.08));
   pointer-events: none;
   animation: shimmer 1.6s linear infinite;
