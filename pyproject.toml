@@ -196,6 +196,7 @@ dev-dependencies = [
     "inngest>=0.4.19",
     "uvicorn>=0.34.0",
     "ipdb>=0.13.13",
+    "tiktoken>=0.7.0",
     "pre-commit>=4.2.0",
     "codespell>=2.4.1",
     "pyright>=1.1.403",
