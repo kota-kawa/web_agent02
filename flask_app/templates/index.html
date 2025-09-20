@@ -16,38 +16,12 @@
     <main class="layout">
       <section class="chat-pane" aria-label="チャット領域">
         <div class="chat-pane__content">
-          <header class="chat-header">
-            <div class="chat-header-text">
-              <p class="chat-header-eyebrow">Browser-use × LLM</p>
-              <h1>ブラウザ制御チャット</h1>
-              <p>
-                左側で会話を進めながら、右側のブラウザにリアルタイムで操作内容が反映されます。
-              </p>
-            </div>
-            <div class="chat-controls" role="group" aria-label="チャット操作">
-              <button
-                type="button"
-                id="pause-button"
-                class="control-button control-button--primary"
-                disabled
-              >
-                一時停止
-              </button>
-              <button type="button" id="reset-button" class="control-button control-button--ghost">
-                履歴リセット
-              </button>
-            </div>
-          </header>
-          <div class="chat-summary">
-            <span class="chat-summary-badge">リアルタイム実験環境</span>
-            <p>
-              Gemini APIキーなどの設定が完了していれば、
-              <strong>自然言語の指示</strong>だけでブラウザ操作を自動化できます。
-            </p>
-          </div>
-          <div class="chat-body">
-            <div class="status-bar">
+          <header class="chat-header chat-header--compact">
+            <div class="chat-header-main">
+              <h1>チャット</h1>
               <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
+            </div>
+            <div class="chat-header-side">
               <div
                 id="connection-indicator"
                 class="connection-indicator"
@@ -58,43 +32,47 @@
                 <span class="dot" aria-hidden="true"></span>
                 <span class="text">接続を待機しています</span>
               </div>
+              <div class="chat-controls" role="group" aria-label="チャット操作">
+                <button
+                  type="button"
+                  id="pause-button"
+                  class="control-button control-button--primary"
+                  disabled
+                >
+                  一時停止
+                </button>
+                <button type="button" id="reset-button" class="control-button control-button--ghost">
+                  履歴リセット
+                </button>
+              </div>
             </div>
+          </header>
+          <div class="chat-body">
             <div
               id="messages"
               class="messages"
               aria-live="polite"
               aria-busy="false"
-              data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
+              data-empty-text="まだメッセージはありません。入力して会話を始めましょう。"
             ></div>
           </div>
         </div>
         <form id="prompt-form" class="prompt-form" autocomplete="off">
           <label for="prompt-input" class="sr-only">プロンプト</label>
-          <div class="prompt-header">
-            <span class="prompt-header-eyebrow">自然言語入力</span>
-            <h2>ブラウザに指示を送信</h2>
-            <p class="prompt-header-description">
-              右側のブラウザで実行したい操作を自然言語で入力してください。
-            </p>
-          </div>
-          <div class="quick-prompts" aria-label="クイックプロンプト">
-            <button type="button" class="quick-prompts__item" data-prompt="Googleを開いて最新ニュースを検索して">最新ニュースをチェック</button>
-            <button type="button" class="quick-prompts__item" data-prompt="YouTubeで生産性の高い作業BGMを探して">作業用BGMを探す</button>
-            <button type="button" class="quick-prompts__item" data-prompt="このページで英語の文章を日本語に翻訳して">日本語に翻訳して</button>
-          </div>
-          <textarea
-            id="prompt-input"
-            name="prompt"
-            placeholder="ブラウザに指示したい内容を入力してください。Shift + Enterで改行できます。"
-            rows="3"
-            required
-          ></textarea>
-          <div class="prompt-footer">
-            <span class="hint">Ctrl / ⌘ + Enterで送信</span>
-            <button type="submit" class="submit-button">
-              <span class="button-label">送信</span>
+          <div class="prompt-form__field">
+            <textarea
+              id="prompt-input"
+              name="prompt"
+              placeholder="ブラウザに指示したい内容を入力してください。"
+              rows="3"
+              required
+            ></textarea>
+            <button type="submit" class="submit-button" aria-label="送信">
               <span class="button-icon" aria-hidden="true">⮕</span>
             </button>
+          </div>
+          <div class="prompt-footer">
+            <span class="hint">Ctrl / ⌘ + Enterで送信</span>
           </div>
         </form>
       </section>
