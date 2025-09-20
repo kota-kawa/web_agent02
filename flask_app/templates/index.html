@@ -4,48 +4,109 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ブラウザ制御デモ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+    />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   </head>
   <body>
-    <div class="layout">
+    <main class="layout">
       <section class="chat-pane" aria-label="チャット領域">
         <header class="chat-header">
           <div class="chat-header-text">
+            <p class="chat-header-eyebrow">Browser-use × LLM</p>
             <h1>ブラウザ制御チャット</h1>
-            <p>左側でLLMからのフィードバックを確認し、指示を送信できます。</p>
+            <p>
+              左側で会話を進めながら、右側のブラウザにリアルタイムで操作内容が反映されます。
+            </p>
           </div>
           <div class="chat-controls" role="group" aria-label="チャット操作">
-            <button type="button" id="pause-button" class="control-button" disabled>
+            <button
+              type="button"
+              id="pause-button"
+              class="control-button control-button--primary"
+              disabled
+            >
               一時停止
             </button>
-            <button type="button" id="reset-button" class="control-button">
+            <button type="button" id="reset-button" class="control-button control-button--ghost">
               履歴リセット
             </button>
           </div>
         </header>
-        <div id="messages" class="messages" aria-live="polite" aria-busy="false"></div>
-        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div class="chat-summary">
+          <span class="chat-summary-badge">リアルタイム実験環境</span>
+          <p>
+            Gemini APIキーなどの設定が完了していれば、
+            <strong>自然言語の指示</strong>だけでブラウザ操作を自動化できます。
+          </p>
+        </div>
+        <div class="status-bar">
+          <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
+          <div
+            id="connection-indicator"
+            class="connection-indicator"
+            role="status"
+            aria-live="polite"
+            data-state="idle"
+          >
+            <span class="dot" aria-hidden="true"></span>
+            <span class="text">接続を待機しています</span>
+          </div>
+        </div>
+        <div
+          id="messages"
+          class="messages"
+          aria-live="polite"
+          aria-busy="false"
+          data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
+        ></div>
         <form id="prompt-form" class="prompt-form" autocomplete="off">
           <label for="prompt-input" class="sr-only">プロンプト</label>
+          <div class="quick-prompts" aria-label="クイックプロンプト">
+            <button type="button" class="quick-prompts__item" data-prompt="Googleを開いて最新ニュースを検索して">最新ニュースをチェック</button>
+            <button type="button" class="quick-prompts__item" data-prompt="YouTubeで生産性の高い作業BGMを探して">作業用BGMを探す</button>
+            <button type="button" class="quick-prompts__item" data-prompt="このページで英語の文章を日本語に翻訳して">日本語に翻訳して</button>
+          </div>
           <textarea
             id="prompt-input"
             name="prompt"
-            placeholder="ブラウザに指示したい内容を入力してください..."
-            rows="4"
+            placeholder="ブラウザに指示したい内容を入力してください。Shift + Enterで改行できます。"
+            rows="3"
             required
           ></textarea>
-          <button type="submit">送信</button>
+          <div class="prompt-footer">
+            <span class="hint">Ctrl / ⌘ + Enterで送信</span>
+            <button type="submit" class="submit-button">
+              <span class="button-label">送信</span>
+              <span class="button-icon" aria-hidden="true">⮕</span>
+            </button>
+          </div>
         </form>
       </section>
       <section class="browser-pane" aria-label="ブラウザ画面">
-        <iframe
-          src="{{ browser_url }}"
-          title="コンテナ内ブラウザ"
-          allow="fullscreen"
-          allowfullscreen
-        ></iframe>
+        <div class="browser-shell">
+          <div class="browser-toolbar" role="presentation">
+            <div class="browser-toolbar-dots" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="browser-toolbar-title">リモートブラウザ</div>
+            <div class="browser-toolbar-url" title="{{ browser_url }}">{{ browser_url }}</div>
+          </div>
+          <iframe
+            src="{{ browser_url }}"
+            title="コンテナ内ブラウザ"
+            allow="fullscreen"
+            allowfullscreen
+          ></iframe>
+        </div>
       </section>
-    </div>
+    </main>
     <script>
       const messagesElement = document.getElementById('messages');
       const statusElement = document.getElementById('status');
@@ -53,11 +114,80 @@
       const promptInput = document.getElementById('prompt-input');
       const pauseButton = document.getElementById('pause-button');
       const resetButton = document.getElementById('reset-button');
+      const quickPrompts = document.querySelectorAll('[data-prompt]');
+      const connectionIndicator = document.getElementById('connection-indicator');
 
       let conversation = [];
       let eventSource;
       let isRunning = false;
       let isPaused = false;
+      let statusClearTimer;
+
+      function setStatus(message, variant = 'info') {
+        if (!statusElement) {
+          return;
+        }
+        if (statusClearTimer) {
+          clearTimeout(statusClearTimer);
+          statusClearTimer = undefined;
+        }
+        statusElement.textContent = message;
+        statusElement.dataset.variant = message ? variant : 'muted';
+        if (message && (variant === 'info' || variant === 'success')) {
+          statusClearTimer = window.setTimeout(() => {
+            statusElement.textContent = '';
+            statusElement.dataset.variant = 'muted';
+            statusClearTimer = undefined;
+          }, 5000);
+        }
+      }
+
+      function setMessagesBusy(isBusy) {
+        if (!messagesElement) {
+          return;
+        }
+        if (isBusy) {
+          messagesElement.classList.add('is-busy');
+          messagesElement.setAttribute('aria-busy', 'true');
+        } else {
+          messagesElement.classList.remove('is-busy');
+          messagesElement.setAttribute('aria-busy', 'false');
+        }
+      }
+
+      function setConnectionState(state) {
+        if (!connectionIndicator) {
+          return;
+        }
+        connectionIndicator.dataset.state = state;
+        const textElement = connectionIndicator.querySelector('.text');
+        let message = '接続を待機しています';
+        if (state === 'connected') {
+          message = 'リアルタイム更新中';
+        } else if (state === 'connecting') {
+          message = '接続中…';
+        } else if (state === 'disconnected') {
+          message = '再接続を試行中';
+        }
+        if (textElement) {
+          textElement.textContent = message;
+        }
+      }
+
+      function updateEmptyState() {
+        if (!messagesElement) {
+          return;
+        }
+        if (messagesElement.children.length === 0) {
+          messagesElement.classList.add('is-empty');
+        } else {
+          messagesElement.classList.remove('is-empty');
+        }
+      }
+
+      setStatus('', 'muted');
+      setConnectionState('idle');
+      updateEmptyState();
 
       function createMessageElement(message) {
         const wrapper = document.createElement('div');
@@ -111,6 +241,7 @@
           messagesElement.appendChild(createMessageElement(message));
         });
         messagesElement.scrollTop = messagesElement.scrollHeight;
+        updateEmptyState();
       }
 
       function appendOrUpdateMessage(message) {
@@ -131,6 +262,7 @@
           messagesElement.appendChild(createMessageElement(message));
           messagesElement.scrollTop = messagesElement.scrollHeight;
         }
+        updateEmptyState();
       }
 
       function updatePauseButtonState() {
@@ -155,15 +287,19 @@
           const data = await response.json();
           conversation = data.messages || [];
           renderMessages(conversation);
+          setStatus('', 'muted');
         } catch (error) {
-          statusElement.textContent = error.message;
+          setStatus(error.message, 'error');
         }
       }
 
       function handleResetEvent() {
         conversation = [];
         renderMessages(conversation);
-        statusElement.textContent = '履歴をリセットしました。';
+        setStatus('履歴をリセットしました。', 'success');
+        setMessagesBusy(false);
+        updatePauseButtonState();
+        setConnectionState('connected');
         loadHistory();
       }
 
@@ -171,7 +307,13 @@
         if (eventSource) {
           eventSource.close();
         }
+        setConnectionState('connecting');
+        setStatus('リアルタイムストリームに接続しています…', 'progress');
         eventSource = new EventSource('/api/stream');
+        eventSource.onopen = () => {
+          setConnectionState('connected');
+          setStatus('リアルタイム更新と同期しました。', 'success');
+        };
         eventSource.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
@@ -187,7 +329,8 @@
           }
         };
         eventSource.onerror = () => {
-          statusElement.textContent = 'ストリーム接続が切断されました。再接続を試みています…';
+          setConnectionState('disconnected');
+          setStatus('ストリーム接続が切断されました。再接続を試みています…', 'warning');
           eventSource.close();
           setTimeout(setupEventStream, 2000);
         };
@@ -197,13 +340,13 @@
         event.preventDefault();
         const prompt = promptInput.value.trim();
         if (!prompt) {
-          statusElement.textContent = 'プロンプトを入力してください。';
+          setStatus('プロンプトを入力してください。', 'warning');
           return;
         }
 
         formElement.classList.add('is-sending');
-        statusElement.textContent = 'エージェントに指示を送信しています…';
-        messagesElement.setAttribute('aria-busy', 'true');
+        setStatus('エージェントに指示を送信しています…', 'progress');
+        setMessagesBusy(true);
         isRunning = true;
         isPaused = false;
         updatePauseButtonState();
@@ -228,12 +371,12 @@
             renderMessages(conversation);
           }
           promptInput.value = '';
-          statusElement.textContent = data.run_summary || '完了しました。';
+          setStatus(data.run_summary || '完了しました。', 'success');
         } catch (error) {
-          statusElement.textContent = error.message || 'エージェントへの送信に失敗しました。';
+          setStatus(error.message || 'エージェントへの送信に失敗しました。', 'error');
         } finally {
           formElement.classList.remove('is-sending');
-          messagesElement.setAttribute('aria-busy', 'false');
+          setMessagesBusy(false);
           isRunning = false;
           isPaused = false;
           updatePauseButtonState();
@@ -255,11 +398,12 @@
               throw new Error(message);
             }
             isPaused = !isPaused;
-            statusElement.textContent = isPaused
-              ? 'エージェントを一時停止しました。'
-              : 'エージェントを再開しました。';
+            setStatus(
+              isPaused ? 'エージェントを一時停止しました。' : 'エージェントを再開しました。',
+              'info',
+            );
           } catch (error) {
-            statusElement.textContent = error.message || '操作に失敗しました。';
+            setStatus(error.message || '操作に失敗しました。', 'error');
           } finally {
             updatePauseButtonState();
           }
@@ -282,15 +426,41 @@
             }
             conversation = data.messages || [];
             renderMessages(conversation);
-            statusElement.textContent = '履歴をリセットしました。';
+            setStatus('履歴をリセットしました。', 'success');
             isRunning = false;
             isPaused = false;
             updatePauseButtonState();
           } catch (error) {
-            statusElement.textContent = error.message || '履歴のリセットに失敗しました。';
+            setStatus(error.message || '履歴のリセットに失敗しました。', 'error');
           } finally {
             resetButton.disabled = false;
           }
+        });
+      }
+
+      if (promptInput) {
+        promptInput.addEventListener('keydown', (event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault();
+            if (formElement && typeof formElement.requestSubmit === 'function') {
+              formElement.requestSubmit();
+            } else if (formElement) {
+              formElement.submit();
+            }
+          }
+        });
+      }
+
+      if (quickPrompts.length > 0) {
+        quickPrompts.forEach((button) => {
+          button.addEventListener('click', () => {
+            const preset = button.dataset.prompt || '';
+            if (preset && promptInput) {
+              promptInput.value = preset;
+              promptInput.focus();
+              setStatus('クイックプロンプトを入力しました。編集して送信できます。', 'info');
+            }
+          });
         });
       }
 
