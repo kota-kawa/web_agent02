@@ -83,6 +83,14 @@ body::before {
   z-index: -1;
 }
 
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 2vw, 18px);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 @supports (backdrop-filter: blur(18px)) {
   .chat-pane {
     backdrop-filter: blur(18px);
@@ -452,6 +460,32 @@ button:not(:disabled) {
   position: relative;
 }
 
+.prompt-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prompt-header-eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: rgba(37, 99, 235, 0.75);
+}
+
+.prompt-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.prompt-header-description {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 @supports (backdrop-filter: blur(12px)) {
   .prompt-form {
     backdrop-filter: blur(12px);
@@ -471,7 +505,7 @@ button:not(:disabled) {
 
 .prompt-form textarea {
   width: 100%;
-  min-height: 130px;
+  min-height: 110px;
   resize: vertical;
   padding: 14px 16px;
   border-radius: 18px;
@@ -682,6 +716,17 @@ button:not(:disabled) {
 
   .connection-indicator {
     justify-content: center;
+  }
+}
+
+@media (max-height: 820px) {
+  .layout {
+    height: auto;
+    min-height: 0;
+  }
+
+  .chat-pane {
+    overflow: visible;
   }
 }
 

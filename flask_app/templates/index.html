@@ -44,28 +44,37 @@
             <strong>自然言語の指示</strong>だけでブラウザ操作を自動化できます。
           </p>
         </div>
-        <div class="status-bar">
-          <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
-          <div
-            id="connection-indicator"
-            class="connection-indicator"
-            role="status"
-            aria-live="polite"
-            data-state="idle"
-          >
-            <span class="dot" aria-hidden="true"></span>
-            <span class="text">接続を待機しています</span>
+        <div class="chat-body">
+          <div class="status-bar">
+            <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
+            <div
+              id="connection-indicator"
+              class="connection-indicator"
+              role="status"
+              aria-live="polite"
+              data-state="idle"
+            >
+              <span class="dot" aria-hidden="true"></span>
+              <span class="text">接続を待機しています</span>
+            </div>
           </div>
+          <div
+            id="messages"
+            class="messages"
+            aria-live="polite"
+            aria-busy="false"
+            data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
+          ></div>
         </div>
-        <div
-          id="messages"
-          class="messages"
-          aria-live="polite"
-          aria-busy="false"
-          data-empty-text="まだメッセージはありません。下のクイックプロンプトから試してみましょう。"
-        ></div>
         <form id="prompt-form" class="prompt-form" autocomplete="off">
           <label for="prompt-input" class="sr-only">プロンプト</label>
+          <div class="prompt-header">
+            <span class="prompt-header-eyebrow">自然言語入力</span>
+            <h2>ブラウザに指示を送信</h2>
+            <p class="prompt-header-description">
+              右側のブラウザで実行したい操作を自然言語で入力してください。
+            </p>
+          </div>
           <div class="quick-prompts" aria-label="クイックプロンプト">
             <button type="button" class="quick-prompts__item" data-prompt="Googleを開いて最新ニュースを検索して">最新ニュースをチェック</button>
             <button type="button" class="quick-prompts__item" data-prompt="YouTubeで生産性の高い作業BGMを探して">作業用BGMを探す</button>
