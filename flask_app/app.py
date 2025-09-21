@@ -998,11 +998,29 @@ def chat() -> ResponseReturnValue:
         message = f'エージェントの実行に失敗しました: {exc}'
         logger.warning(message)
         _append_history_message('assistant', message)
+        _broadcaster.publish(
+            {
+                'type': 'status',
+                'payload': {
+                    'agent_running': False,
+                    'run_summary': message,
+                },
+            }
+        )
         return jsonify({'messages': _copy_history(), 'run_summary': message}), 200
     except Exception as exc:  # noqa: BLE001
         logger.exception('Unexpected error while running browser agent')
         error_message = f'エージェントの実行中に予期しないエラーが発生しました: {exc}'
         _append_history_message('assistant', error_message)
+        _broadcaster.publish(
+            {
+                'type': 'status',
+                'payload': {
+                    'agent_running': False,
+                    'run_summary': error_message,
+                },
+            }
+        )
         return jsonify({'messages': _copy_history(), 'run_summary': error_message}), 200
 
     step_messages = _format_history_messages(agent_history)
@@ -1021,6 +1039,15 @@ def chat() -> ResponseReturnValue:
 
     summary_message = _summarize_history(agent_history)
     _append_history_message('assistant', summary_message)
+    _broadcaster.publish(
+        {
+            'type': 'status',
+            'payload': {
+                'agent_running': False,
+                'run_summary': summary_message,
+            },
+        }
+    )
 
     return jsonify({'messages': _copy_history(), 'run_summary': summary_message}), 200
 
