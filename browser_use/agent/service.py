@@ -450,18 +450,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Keep only alphanumeric characters so the identifier check passes
 		suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
+		suffix = suffix_source[-8:] if suffix_source else ''
+		name = f'Agent_{suffix}' if suffix else ''
 
-		if not suffix_source:
-			# Fallback to a UUID-derived suffix if the agent id contains no usable characters
-			suffix_source = uuid7str().replace('-', '')
-
-		suffix = suffix_source[-8:]
-		name = f'Agent_{suffix}'
-
-		if not name.isidentifier():
-			# This should rarely happen, but make absolutely sure the identifier is valid
+		# If sanitizing removed everything or we somehow produced an invalid identifier, retry with UUIDs
+		while not suffix or not name.isidentifier():
 			fallback = uuid7str().replace('-', '')
-			name = f'Agent_{fallback[-8:]}'
+			suffix = fallback[-8:]
+			name = f'Agent_{suffix}'
 
 		assert name.isidentifier(), f'Failed to generate valid EventBus name: {name}'
 		return name
