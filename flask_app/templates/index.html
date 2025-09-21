@@ -345,6 +345,8 @@
         promptInput.value = '';
         promptInput.focus();
 
+        let shouldContinueRunning = false;
+
         try {
           const response = await fetch('/api/chat', {
             method: 'POST',
@@ -364,7 +366,12 @@
             conversation = data.messages;
             renderMessages(conversation);
           }
-          setStatus(data.run_summary || '完了しました。', 'success');
+          const agentStillRunning = response.status === 202 || data.agent_running === true;
+          shouldContinueRunning = agentStillRunning;
+          const runSummary =
+            data.run_summary ||
+            (agentStillRunning ? 'エージェントが実行を継続しています。' : '完了しました。');
+          setStatus(runSummary, agentStillRunning ? 'progress' : 'success');
         } catch (error) {
           if (!promptInput.value.trim()) {
             promptInput.value = submittedPromptValue;
@@ -375,11 +382,14 @@
             promptInput.focus();
           }
           setStatus(error.message || 'エージェントへの送信に失敗しました。', 'error');
+          shouldContinueRunning = false;
         } finally {
           formElement.classList.remove('is-sending');
           setMessagesBusy(false);
-          isRunning = false;
-          isPaused = false;
+          if (!shouldContinueRunning) {
+            isRunning = false;
+            isPaused = false;
+          }
           updatePauseButtonState();
         }
       });
