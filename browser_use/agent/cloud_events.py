@@ -172,7 +172,7 @@ class CreateAgentStepEvent(BaseEvent):
 			if hasattr(agent, 'cloud_sync') and agent.cloud_sync and agent.cloud_sync.auth_client
 			else None,
 			agent_task_id=str(agent.task_id),
-			step=agent.state.n_steps,
+			step=agent.current_step_number,
 			evaluation_previous_goal=current_state.evaluation_previous_goal if current_state else '',
 			memory=current_state.memory if current_state else '',
 			next_goal=current_state.next_goal if current_state else '',

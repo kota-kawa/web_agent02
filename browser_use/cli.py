@@ -860,10 +860,7 @@ class BrowserUseApp(App):
 		# Make sure intro is hidden and log is ready
 		self.hide_intro_panels()
 
-		# Clear the main output log to start fresh
-		rich_log = self.query_one('#main-output-log', RichLog)
-		rich_log.clear()
-
+		created_new_agent = False
 		if self.agent is None:
 			if not self.llm:
 				raise RuntimeError('LLM not initialized')
@@ -875,21 +872,40 @@ class BrowserUseApp(App):
 				source='cli',
 				**agent_settings.model_dump(),
 			)
+			created_new_agent = True
 			# Update our browser_session reference to point to the agent's
 			if hasattr(self.agent, 'browser_session'):
 				self.browser_session = self.agent.browser_session
 				# Set up event bus listener (will clean up any old handler first)
 				self.setup_event_bus_listener()
 		else:
+			agent_is_running = getattr(self.agent, 'running', False)
+			if agent_is_running:
+				self.agent.add_new_task(task)
+				self._telemetry.capture(
+					CLITelemetryEvent(
+						version=get_browser_use_version(),
+						action='message_sent',
+						mode='interactive',
+						model=self.llm.model if self.llm and hasattr(self.llm, 'model') else None,
+						model_provider=self.llm.provider if self.llm and hasattr(self.llm, 'provider') else None,
+					)
+				)
+				logger.info(f'📝 Added follow-up instruction: {task}')
+				return
+
+		# Clear the main output log to start fresh for a new run
+		rich_log = self.query_one('#main-output-log', RichLog)
+		rich_log.clear()
+
+		if self.agent is not None and not created_new_agent:
 			self.agent.add_new_task(task)
 
 		# Let the agent run in the background
 		async def agent_task_worker() -> None:
 			logger.debug('\n🚀 Working on task: %s', task)
 
-			# Set flags to indicate the agent is running
 			if self.agent:
-				self.agent.running = True  # type: ignore
 				self.agent.last_response_time = 0  # type: ignore
 
 			# Panel updates are already happening via the timer in update_info_panels
@@ -916,10 +932,6 @@ class BrowserUseApp(App):
 				error_msg = str(e)
 				logger.error('\nError running agent: %s', str(e))
 			finally:
-				# Clear the running flag
-				if self.agent:
-					self.agent.running = False  # type: ignore
-
 				# Capture telemetry for task completion
 				duration = time.time() - task_start_time
 				self._telemetry.capture(
@@ -949,7 +961,6 @@ class BrowserUseApp(App):
 
 		# Run the worker
 		self.run_worker(agent_task_worker, name='agent_task')
-
 	def action_input_history_prev(self) -> None:
 		"""Navigate to the previous item in command history."""
 		# Only process if we have history and input is focused

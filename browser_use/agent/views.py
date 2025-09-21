@@ -56,25 +56,26 @@ class AgentSettings(BaseModel):
 
 
 class AgentState(BaseModel):
-	"""Holds all state information for an Agent"""
+        """Holds all state information for an Agent"""
 
-	model_config = ConfigDict(arbitrary_types_allowed=True)
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
-	agent_id: str = Field(default_factory=uuid7str)
-	n_steps: int = 1
-	consecutive_failures: int = 0
-	last_result: list[ActionResult] | None = None
-	last_plan: str | None = None
-	last_model_output: AgentOutput | None = None
+        agent_id: str = Field(default_factory=uuid7str)
+        n_steps: int = 1
+        step_offset: int = 0
+        consecutive_failures: int = 0
+        last_result: list[ActionResult] | None = None
+        last_plan: str | None = None
+        last_model_output: AgentOutput | None = None
 
-	# Pause/resume state (kept serialisable for checkpointing)
-	paused: bool = False
-	stopped: bool = False
-	session_initialized: bool = False  # Track if session events have been dispatched
-	follow_up_task: bool = False  # Track if the agent is a follow-up task
+        # Pause/resume state (kept serialisable for checkpointing)
+        paused: bool = False
+        stopped: bool = False
+        session_initialized: bool = False  # Track if session events have been dispatched
+        follow_up_task: bool = False  # Track if the agent is a follow-up task
 
-	message_manager_state: MessageManagerState = Field(default_factory=MessageManagerState)
-	file_system_state: FileSystemState | None = None
+        message_manager_state: MessageManagerState = Field(default_factory=MessageManagerState)
+        file_system_state: FileSystemState | None = None
 
 
 @dataclass
@@ -127,16 +128,17 @@ class ActionResult(BaseModel):
 
 
 class StepMetadata(BaseModel):
-	"""Metadata for a single step including timing and token information"""
+        """Metadata for a single step including timing and token information"""
 
-	step_start_time: float
-	step_end_time: float
-	step_number: int
+        step_start_time: float
+        step_end_time: float
+        step_number: int
+        absolute_step_number: int | None = None
 
-	@property
-	def duration_seconds(self) -> float:
-		"""Calculate step duration in seconds"""
-		return self.step_end_time - self.step_start_time
+        @property
+        def duration_seconds(self) -> float:
+                """Calculate step duration in seconds"""
+                return self.step_end_time - self.step_start_time
 
 
 class AgentBrain(BaseModel):
