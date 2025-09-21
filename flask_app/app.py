@@ -758,6 +758,24 @@ class BrowserAgentController:
         future = asyncio.run_coroutine_threadsafe(_invoke(), self._loop)
         future.result()
 
+    def enqueue_follow_up(self, task: str) -> None:
+        with self._state_lock:
+            agent = self._current_agent
+            running = self._is_running
+
+        if not agent or not running:
+            raise AgentControllerError('エージェントは実行中ではありません。')
+
+        def _apply() -> None:
+            agent.add_new_task(task)
+
+        try:
+            self._call_in_loop(_apply)
+        except AgentControllerError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
+
     def _record_step_message_id(self, step_number: int, message_id: int) -> None:
         with self._step_message_lock:
             self._step_message_ids[step_number] = message_id
@@ -948,6 +966,32 @@ def chat() -> ResponseReturnValue:
 
     try:
         controller = _get_agent_controller()
+        if controller.is_running():
+            try:
+                controller.enqueue_follow_up(prompt)
+            except AgentControllerError as exc:
+                message = f'フォローアップの指示の適用に失敗しました: {exc}'
+                logger.warning(message)
+                _append_history_message('assistant', message)
+                return (
+                    jsonify({'messages': _copy_history(), 'run_summary': message, 'queued': False}),
+                    200,
+                )
+
+            ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
+            _append_history_message('assistant', ack_message)
+            return (
+                jsonify(
+                    {
+                        'messages': _copy_history(),
+                        'run_summary': ack_message,
+                        'queued': True,
+                        'agent_running': True,
+                    }
+                ),
+                202,
+            )
+
         run_result = controller.run(prompt)
         agent_history = run_result.history
     except AgentControllerError as exc:
