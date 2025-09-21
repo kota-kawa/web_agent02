@@ -222,6 +222,13 @@ _DEFAULT_START_URL = _normalize_start_url(
     _get_env_trimmed('BROWSER_DEFAULT_START_URL'),
 ) or 'https://www.yahoo.co.jp'
 
+_LANGUAGE_EXTENSION = (
+    '### 追加の言語ガイドライン\n'
+    '- すべての思考過程、行動の評価、メモリ、次の目標、最終報告などの文章は必ず自然な日本語で記述してください。\n'
+    '- 成功や失敗などのステータスも日本語（例: 成功、失敗、未確定）で明示してください。\n'
+    '- Webページ上の固有名詞や引用、ユーザーに提示する必要がある原文テキストは、そのままの言語で保持しても問題ありません。\n'
+)
+
 
 def _resolve_gemini_api_key() -> str:
     for key in ('GOOGLE_API_KEY', 'GEMINI_API_KEY'):
@@ -688,6 +695,7 @@ class BrowserAgentController:
             browser_session=session,
             llm=self._llm,
             register_new_step_callback=handle_new_step,
+            extend_system_message=_LANGUAGE_EXTENSION,
         )
         if _DEFAULT_START_URL and not agent.initial_actions:
             try:
