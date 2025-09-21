@@ -327,18 +327,23 @@
 
       formElement.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const prompt = promptInput.value.trim();
+        const rawPrompt = promptInput.value;
+        const prompt = rawPrompt.trim();
         if (!prompt) {
           setStatus('プロンプトを入力してください。', 'warning');
           return;
         }
 
+        const submittedPromptValue = rawPrompt;
         formElement.classList.add('is-sending');
         setStatus('エージェントに指示を送信しています…', 'progress');
         setMessagesBusy(true);
         isRunning = true;
         isPaused = false;
         updatePauseButtonState();
+
+        promptInput.value = '';
+        promptInput.focus();
 
         try {
           const response = await fetch('/api/chat', {
@@ -359,9 +364,16 @@
             conversation = data.messages;
             renderMessages(conversation);
           }
-          promptInput.value = '';
           setStatus(data.run_summary || '完了しました。', 'success');
         } catch (error) {
+          if (!promptInput.value.trim()) {
+            promptInput.value = submittedPromptValue;
+            if (typeof promptInput.setSelectionRange === 'function') {
+              const length = promptInput.value.length;
+              promptInput.setSelectionRange(length, length);
+            }
+            promptInput.focus();
+          }
           setStatus(error.message || 'エージェントへの送信に失敗しました。', 'error');
         } finally {
           formElement.classList.remove('is-sending');
