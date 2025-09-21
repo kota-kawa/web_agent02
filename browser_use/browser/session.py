@@ -411,6 +411,9 @@ class BrowserSession(BaseModel):
 		self._permissions_watchdog = None
 		self._recording_watchdog = None
 
+		if hasattr(self, '_watchdogs_attached'):
+			self._watchdogs_attached = False
+
 	def model_post_init(self, __context) -> None:
 		"""Register event handlers after model initialization."""
 		# Check if handlers are already registered to prevent duplicates
@@ -460,6 +463,7 @@ class BrowserSession(BaseModel):
 		await self.reset()
 		# Create fresh event bus
 		self.event_bus = EventBus()
+		self.model_post_init(None)
 
 	async def stop(self) -> None:
 		"""Stop the browser session without killing the browser process.
@@ -482,6 +486,7 @@ class BrowserSession(BaseModel):
 		await self.reset()
 		# Create fresh event bus
 		self.event_bus = EventBus()
+		self.model_post_init(None)
 
 	async def on_BrowserStartEvent(self, event: BrowserStartEvent) -> dict[str, str]:
 		"""Handle browser start request.
