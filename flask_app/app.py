@@ -646,9 +646,12 @@ class BrowserAgentController:
         self._logger = logging.getLogger('browser_use.flask.agent')
         self._cdp_cleanup = cdp_cleanup
         self._llm = _create_gemini_llm()
+        self._agent: Agent | None = None
         self._current_agent: Agent | None = None
         self._is_running = False
         self._paused = False
+        self._step_message_ids: dict[int, int] = {}
+        self._step_message_lock = threading.Lock()
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -686,29 +689,46 @@ class BrowserAgentController:
             try:
                 content = _format_step_plan(step_number, state_summary, model_output)
                 message = _append_history_message('assistant', content)
-                step_message_ids[step_number] = int(message['id'])
+                message_id = int(message['id'])
+                step_message_ids[step_number] = message_id
+                self.remember_step_message_id(step_number, message_id)
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to broadcast step update', exc_info=True)
 
-        agent = Agent(
-            task=task,
-            browser_session=session,
-            llm=self._llm,
-            register_new_step_callback=handle_new_step,
-            extend_system_message=_LANGUAGE_EXTENSION,
-        )
-        if _DEFAULT_START_URL and not agent.initial_actions:
+        with self._state_lock:
+            existing_agent = self._agent
+
+        if existing_agent is None:
+            agent = Agent(
+                task=task,
+                browser_session=session,
+                llm=self._llm,
+                register_new_step_callback=handle_new_step,
+                extend_system_message=_LANGUAGE_EXTENSION,
+            )
+            if _DEFAULT_START_URL and not agent.initial_actions:
+                try:
+                    agent.initial_url = _DEFAULT_START_URL
+                    agent.initial_actions = agent._convert_initial_actions(
+                        [{'go_to_url': {'url': _DEFAULT_START_URL, 'new_tab': False}}]
+                    )
+                except Exception:  # noqa: BLE001
+                    self._logger.debug(
+                        'Failed to apply default start URL %s',
+                        _DEFAULT_START_URL,
+                        exc_info=True,
+                    )
+            with self._state_lock:
+                self._agent = agent
+        else:
+            agent = existing_agent
+            agent.browser_session = session
+            agent.register_new_step_callback = handle_new_step
             try:
-                agent.initial_url = _DEFAULT_START_URL
-                agent.initial_actions = agent._convert_initial_actions(
-                    [{'go_to_url': {'url': _DEFAULT_START_URL, 'new_tab': False}}]
-                )
-            except Exception:  # noqa: BLE001
-                self._logger.debug(
-                    'Failed to apply default start URL %s',
-                    _DEFAULT_START_URL,
-                    exc_info=True,
-                )
+                agent.add_new_task(task)
+            except Exception as exc:  # noqa: BLE001
+                raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
+
         with self._state_lock:
             self._current_agent = agent
             self._is_running = True
@@ -737,6 +757,24 @@ class BrowserAgentController:
 
         future = asyncio.run_coroutine_threadsafe(_invoke(), self._loop)
         future.result()
+
+    def _record_step_message_id(self, step_number: int, message_id: int) -> None:
+        with self._step_message_lock:
+            self._step_message_ids[step_number] = message_id
+
+    def _lookup_step_message_id(self, step_number: int) -> int | None:
+        with self._step_message_lock:
+            return self._step_message_ids.get(step_number)
+
+    def _clear_step_message_ids(self) -> None:
+        with self._step_message_lock:
+            self._step_message_ids.clear()
+
+    def remember_step_message_id(self, step_number: int, message_id: int) -> None:
+        self._record_step_message_id(step_number, message_id)
+
+    def get_step_message_id(self, step_number: int) -> int | None:
+        return self._lookup_step_message_id(step_number)
 
     def pause(self) -> None:
         with self._state_lock:
@@ -784,6 +822,15 @@ class BrowserAgentController:
         with self._state_lock:
             return self._paused
 
+    def reset(self) -> None:
+        with self._state_lock:
+            if self._is_running:
+                raise AgentControllerError('エージェント実行中はリセットできません。')
+            self._agent = None
+            self._current_agent = None
+            self._paused = False
+        self._clear_step_message_ids()
+
     def run(self, task: str) -> AgentRunResult:
         if self._shutdown:
             raise AgentControllerError('エージェントコントローラーは停止済みです。')
@@ -801,6 +848,11 @@ class BrowserAgentController:
         if self._shutdown:
             return
         self._shutdown = True
+        with self._state_lock:
+            self._agent = None
+            self._current_agent = None
+            self._paused = False
+        self._clear_step_message_ids()
 
         if self._loop.is_running():
             try:
@@ -912,11 +964,16 @@ def chat() -> ResponseReturnValue:
     step_messages = _format_history_messages(agent_history)
     for index, content in enumerate(step_messages, start=1):
         message_id = run_result.step_message_ids.get(index)
+        if message_id is None:
+            message_id = controller.get_step_message_id(index)
         if message_id is not None:
             _update_history_message(message_id, content)
+            controller.remember_step_message_id(index, message_id)
         else:
             appended = _append_history_message('assistant', content)
-            run_result.step_message_ids[index] = int(appended['id'])
+            new_id = int(appended['id'])
+            controller.remember_step_message_id(index, new_id)
+            run_result.step_message_ids[index] = new_id
 
     summary_message = _summarize_history(agent_history)
     _append_history_message('assistant', summary_message)
@@ -926,6 +983,16 @@ def chat() -> ResponseReturnValue:
 
 @app.post('/api/reset')
 def reset_conversation() -> ResponseReturnValue:
+    controller = _AGENT_CONTROLLER
+    if controller is not None:
+        try:
+            controller.reset()
+        except AgentControllerError as exc:
+            return jsonify({'error': str(exc)}), 400
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Failed to reset agent controller')
+            return jsonify({'error': f'エージェントのリセットに失敗しました: {exc}'}), 500
+
     try:
         snapshot = _reset_history()
     except Exception as exc:  # noqa: BLE001
