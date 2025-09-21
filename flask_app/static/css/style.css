@@ -530,7 +530,6 @@ button:not(:disabled) {
 }
 
 .prompt-form.is-sending .submit-button {
-  cursor: wait;
   transform: none;
   background: #1d4ed8;
 }
