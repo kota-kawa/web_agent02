@@ -312,6 +312,14 @@
               appendOrUpdateMessage(payload.payload);
             } else if (payload.type === 'reset') {
               handleResetEvent();
+            } else if (payload.type === 'status' && payload.payload) {
+              const statusPayload = payload.payload || {};
+              isRunning = false;
+              isPaused = false;
+              updatePauseButtonState();
+              if (statusPayload.run_summary) {
+                setStatus(statusPayload.run_summary, 'success');
+              }
             }
           } catch (error) {
             console.error('ストリームの処理に失敗しました', error);
@@ -367,7 +375,7 @@
             renderMessages(conversation);
           }
           const agentStillRunning = response.status === 202 || data.agent_running === true;
-          shouldContinueRunning = agentStillRunning;
+          shouldContinueRunning = Boolean(agentStillRunning);
           const runSummary =
             data.run_summary ||
             (agentStillRunning ? 'エージェントが実行を継続しています。' : '完了しました。');
@@ -386,8 +394,8 @@
         } finally {
           formElement.classList.remove('is-sending');
           setMessagesBusy(false);
+          isRunning = shouldContinueRunning;
           if (!shouldContinueRunning) {
-            isRunning = false;
             isPaused = false;
           }
           updatePauseButtonState();
