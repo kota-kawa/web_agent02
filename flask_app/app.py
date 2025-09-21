@@ -751,6 +751,11 @@ class BrowserAgentController:
                 with suppress(Exception):
                     await session.stop()
             with self._state_lock:
+                if self._browser_session is session:
+                    self._logger.debug(
+                        'Browser session stopped; a new session will be created on the next run.',
+                    )
+                    self._browser_session = None
                 self._current_agent = None
                 self._is_running = False
                 self._paused = False
