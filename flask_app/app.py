@@ -697,6 +697,16 @@ class BrowserAgentController:
 
         with self._state_lock:
             existing_agent = self._agent
+            agent_running = self._is_running
+
+        if existing_agent is not None and not agent_running:
+            # The previous agent has finished its run, so start with a clean slate
+            self._clear_step_message_ids()
+            with self._state_lock:
+                existing_agent = None
+                self._agent = None
+                self._current_agent = None
+                self._paused = False
 
         if existing_agent is None:
             agent = Agent(
