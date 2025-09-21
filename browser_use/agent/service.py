@@ -210,6 +210,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.id = task_id or uuid7str()
 		self.task_id: str = self.id
 		self.session_id: str = uuid7str()
+		self.running: bool = False
+		self.last_response_time: float = 0.0
 
 		browser_profile = browser_profile or DEFAULT_BROWSER_PROFILE
 
@@ -605,13 +607,39 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# The task continues with new instructions, it doesn't end and start a new one
 		self.task = new_task
 		self._message_manager.add_new_task(new_task)
-		# Mark as follow-up task and recreate eventbus (gets shut down after each run)
+		# Mark as follow-up task so we preserve state-specific behaviours like skipping initial actions
 		self.state.follow_up_task = True
-		self.eventbus = EventBus(name=f'Agent_{str(self.id)[-self.state.n_steps :]}')
 
-		# Re-register cloud sync handler if it exists (if not disabled)
-		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
-			self.eventbus.on('*', self.cloud_sync.handle_event)
+		# Only recreate the event bus when we're not actively running (the previous run shut it down)
+		if not self.running:
+			self.eventbus = EventBus(name=f'Agent_{str(self.id)[-4:]}')
+
+			# Re-register cloud sync handler if it exists (if not disabled)
+			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
+				self.eventbus.on('*', self.cloud_sync.handle_event)
+
+
+	def _current_step_number(self) -> int:
+		"""Return the current step number relative to the latest run."""
+
+		if not hasattr(self.state, 'step_offset'):
+			return self.state.n_steps
+
+		current_step = self.state.n_steps - self.state.step_offset
+		return current_step if current_step > 0 else 1
+
+	@property
+	def current_step_number(self) -> int:
+		"""Public accessor for the current step number within the active run."""
+
+		return self._current_step_number()
+
+	@property
+	def steps_completed_in_current_run(self) -> int:
+		"""Number of steps completed during the most recent run."""
+
+		current_step = self._current_step_number()
+		return current_step - 1 if current_step > 0 else 0
 
 	async def _raise_if_stopped_or_paused(self) -> None:
 		"""Utility function that raises an InterruptedError if the agent is stopped or paused."""
@@ -660,7 +688,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		assert self.browser_session is not None, 'BrowserSession is not set up'
 
-		self.logger.debug(f'🌐 Step {self.state.n_steps}: Getting browser state...')
+		current_step = self._current_step_number()
+		self.logger.debug(f'🌐 Step {current_step}: Getting browser state...')
 		# Always take screenshots for all steps
 		self.logger.debug('📸 Requesting browser state with include_screenshot=True')
 		browser_state_summary = await self.browser_session.get_browser_state_summary(
@@ -674,20 +703,20 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.logger.debug('📸 Got browser state WITHOUT screenshot')
 
 		# Check for new downloads after getting browser state (catches PDF auto-downloads and previous step downloads)
-		await self._check_and_update_downloads(f'Step {self.state.n_steps}: after getting browser state')
+		await self._check_and_update_downloads(f'Step {current_step}: after getting browser state')
 
 		self._log_step_context(browser_state_summary)
 		await self._raise_if_stopped_or_paused()
 
 		# Update action models with page-specific actions
-		self.logger.debug(f'📝 Step {self.state.n_steps}: Updating action models...')
+		self.logger.debug(f'📝 Step {current_step}: Updating action models...')
 		await self._update_action_models_for_page(browser_state_summary.url)
 
 		# Get page-specific filtered actions
 		page_filtered_actions = self.tools.registry.get_prompt_description(browser_state_summary.url)
 
 		# Page-specific actions will be included directly in the browser_state message
-		self.logger.debug(f'💬 Step {self.state.n_steps}: Creating state messages for context...')
+		self.logger.debug(f'💬 Step {current_step}: Creating state messages for context...')
 		self._message_manager.create_state_messages(
 			browser_state_summary=browser_state_summary,
 			model_output=self.state.last_model_output,
@@ -707,8 +736,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	async def _get_next_action(self, browser_state_summary: BrowserStateSummary) -> None:
 		"""Execute LLM interaction with retry logic and handle callbacks"""
 		input_messages = self._message_manager.get_messages()
+		current_step = self._current_step_number()
 		self.logger.debug(
-			f'🤖 Step {self.state.n_steps}: Calling LLM with {len(input_messages)} messages (model: {self.llm.model})...'
+			f'🤖 Step {current_step}: Calling LLM with {len(input_messages)} messages (model: {self.llm.model})...'
 		)
 
 		try:
@@ -744,9 +774,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if self.state.last_model_output is None:
 			raise ValueError('No model output to execute actions from')
 
-		self.logger.debug(f'⚡ Step {self.state.n_steps}: Executing {len(self.state.last_model_output.action)} actions...')
+		current_step = self._current_step_number()
+		self.logger.debug(f'⚡ Step {current_step}: Executing {len(self.state.last_model_output.action)} actions...')
 		result = await self.multi_act(self.state.last_model_output.action)
-		self.logger.debug(f'✅ Step {self.state.n_steps}: Actions completed')
+		self.logger.debug(f'✅ Step {current_step}: Actions completed')
 
 		self.state.last_result = result
 
@@ -760,11 +791,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# check for action errors  and len more than 1
 		if self.state.last_result and len(self.state.last_result) == 1 and self.state.last_result[-1].error:
 			self.state.consecutive_failures += 1
-			self.logger.debug(f'🔄 Step {self.state.n_steps}: Consecutive failures: {self.state.consecutive_failures}')
+			current_step = self._current_step_number()
+			self.logger.debug(
+				f'🔄 Step {current_step}: Consecutive failures: {self.state.consecutive_failures}'
+			)
 			return
 
 		self.state.consecutive_failures = 0
-		self.logger.debug(f'🔄 Step {self.state.n_steps}: Consecutive failures reset to: {self.state.consecutive_failures}')
+		current_step = self._current_step_number()
+		self.logger.debug(
+			f'🔄 Step {current_step}: Consecutive failures reset to: {self.state.consecutive_failures}'
+		)
 
 		# Log completion results
 		if self.state.last_result and len(self.state.last_result) > 0 and self.state.last_result[-1].is_done:
@@ -814,8 +851,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			return
 
 		if browser_state_summary:
+			current_step = self._current_step_number()
 			metadata = StepMetadata(
-				step_number=self.state.n_steps,
+				step_number=current_step,
+				absolute_step_number=self.state.n_steps,
 				step_start_time=self.step_start_time,
 				step_end_time=step_end_time,
 			)
@@ -880,8 +919,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	async def _get_model_output_with_retry(self, input_messages: list[BaseMessage]) -> AgentOutput:
 		"""Get model output with retry logic for empty actions"""
 		model_output = await self.get_model_output(input_messages)
+		current_step = self._current_step_number()
 		self.logger.debug(
-			f'✅ Step {self.state.n_steps}: Got LLM response with {len(model_output.action) if model_output.action else 0} actions'
+			f'✅ Step {current_step}: Got LLM response with {len(model_output.action) if model_output.action else 0} actions'
 		)
 
 		if (
@@ -962,13 +1002,22 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Store screenshot and get path
 		screenshot_path = None
 		if browser_state_summary.screenshot:
+			current_step = metadata.step_number if metadata and metadata.step_number is not None else self._current_step_number()
 			self.logger.debug(
-				f'📸 Storing screenshot for step {self.state.n_steps}, screenshot length: {len(browser_state_summary.screenshot)}'
+				f'📸 Storing screenshot for step {current_step}, screenshot length: {len(browser_state_summary.screenshot)}'
 			)
-			screenshot_path = await self.screenshot_service.store_screenshot(browser_state_summary.screenshot, self.state.n_steps)
+			storage_step = (
+				metadata.absolute_step_number
+				if metadata and metadata.absolute_step_number is not None
+				else self.state.n_steps
+			)
+			screenshot_path = await self.screenshot_service.store_screenshot(
+				browser_state_summary.screenshot, storage_step
+			)
 			self.logger.debug(f'📸 Screenshot stored at: {screenshot_path}')
 		else:
-			self.logger.debug(f'📸 No screenshot in browser_state_summary for step {self.state.n_steps}')
+			current_step = metadata.step_number if metadata and metadata.step_number is not None else self._current_step_number()
+			self.logger.debug(f'📸 No screenshot in browser_state_summary for step {current_step}')
 
 		state_history = BrowserStateHistory(
 			url=browser_state_summary.url,
@@ -1193,8 +1242,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		url = browser_state_summary.url if browser_state_summary else ''
 		url_short = url[:50] + '...' if len(url) > 50 else url
 		interactive_count = len(browser_state_summary.dom_state.selector_map) if browser_state_summary else 0
+		current_step = self._current_step_number()
 		self.logger.info('\n')
-		self.logger.info(f'📍 Step {self.state.n_steps}:')
+		self.logger.info(f'📍 Step {current_step}:')
 		self.logger.debug(f'Evaluating page with {interactive_count} interactive elements on: {url_short}')
 
 	def _log_next_action_summary(self, parsed: 'AgentOutput') -> None:
@@ -1258,8 +1308,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		status_parts = [part for part in [success_indicator, failure_indicator] if part]
 		status_str = ' | '.join(status_parts) if status_parts else '✅ 0'
 
+		current_step = self._current_step_number()
 		self.logger.debug(
-			f'📍 Step {self.state.n_steps}: Ran {action_count} action{"" if action_count == 1 else "s"} in {step_duration:.2f}s: {status_str}'
+			f'📍 Step {current_step}: Ran {action_count} action{"" if action_count == 1 else "s"} in {step_duration:.2f}s: {status_str}'
 		)
 
 	def _log_agent_event(self, max_steps: int, agent_run_error: str | None = None) -> None:
@@ -1301,7 +1352,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				action_errors=self.history.errors(),
 				action_history=action_history_data,
 				urls_visited=self.history.urls(),
-				steps=self.state.n_steps,
+				steps=self.steps_completed_in_current_run(),
 				total_input_tokens=token_summary.prompt_tokens,
 				total_duration_seconds=self.history.total_duration_seconds(),
 				success=self.history.is_successful(),
@@ -1407,6 +1458,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		signal_handler.register()
 
 		try:
+			self.running = True
+			self.state.step_offset = max(0, self.state.n_steps - 1)
+			self.state.consecutive_failures = 0
+
 			self._log_agent_run()
 
 			self.logger.debug(
@@ -1542,6 +1597,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			raise e
 
 		finally:
+			self.running = False
 			# Log token usage summary
 			await self.token_cost_service.log_usage_summary()
 
@@ -1839,6 +1895,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 			metadata = StepMetadata(
 				step_number=0,
+				absolute_step_number=0,
 				step_start_time=time.time(),
 				step_end_time=time.time(),
 			)
