@@ -29,6 +29,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: clamp(16px, 2.5vw, 28px);
   font-family: inherit;
   line-height: 1.6;
@@ -56,7 +57,9 @@ body::before {
   width: min(1680px, 100%);
   margin: 0 auto;
   height: calc(100vh - clamp(32px, 5vw, 60px));
-  min-height: 640px;
+  height: calc(100dvh - clamp(32px, 5vw, 60px));
+  min-height: min(640px, calc(100vh - clamp(32px, 5vw, 60px)));
+  min-height: min(640px, calc(100dvh - clamp(32px, 5vw, 60px)));
 }
 
 
@@ -321,8 +324,9 @@ button:not(:disabled) {
 
 .messages {
   position: relative;
-  flex: 1 1 auto;
-  min-height: clamp(220px, 40vh, 440px);
+  flex: 1 1 clamp(220px, 40vh, 440px);
+  min-height: 0;
+  max-height: 100%;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -674,17 +678,6 @@ button:not(:disabled) {
 
   .connection-indicator {
     justify-content: center;
-  }
-}
-
-@media (max-height: 820px) {
-  .layout {
-    height: auto;
-    min-height: 0;
-  }
-
-  .chat-pane {
-    overflow: visible;
   }
 }
 
