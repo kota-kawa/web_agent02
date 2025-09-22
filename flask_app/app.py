@@ -699,14 +699,8 @@ class BrowserAgentController:
             existing_agent = self._agent
             agent_running = self._is_running
 
-        if existing_agent is not None and not agent_running:
-            # The previous agent has finished its run, so start with a clean slate
-            self._clear_step_message_ids()
-            with self._state_lock:
-                existing_agent = None
-                self._agent = None
-                self._current_agent = None
-                self._paused = False
+        if agent_running:
+            raise AgentControllerError('エージェントは実行中です。')
 
         if existing_agent is None:
             agent = Agent(
@@ -747,15 +741,21 @@ class BrowserAgentController:
             history = await agent.run(max_steps=self._max_steps)
             return AgentRunResult(history=history, step_message_ids=step_message_ids)
         finally:
-            if session.browser_profile.keep_alive:
+            keep_alive = session.browser_profile.keep_alive
+            if keep_alive:
                 with suppress(Exception):
                     await session.stop()
             with self._state_lock:
                 if self._browser_session is session:
-                    self._logger.debug(
-                        'Browser session stopped; a new session will be created on the next run.',
-                    )
-                    self._browser_session = None
+                    if keep_alive:
+                        self._logger.debug(
+                            'Browser session kept alive for follow-up runs.',
+                        )
+                    else:
+                        self._logger.debug(
+                            'Browser session stopped; a new session will be created on the next run.',
+                        )
+                        self._browser_session = None
                 self._current_agent = None
                 self._is_running = False
                 self._paused = False
