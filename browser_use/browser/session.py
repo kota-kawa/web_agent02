@@ -1953,6 +1953,13 @@ class BrowserSession(BaseModel):
 			True if target should be processed, False if it should be skipped
 		"""
 		target_type = target_info.get('type', '')
+		# CDP TargetInfo can include a subtype for out-of-process iframes (OOPIF).
+		# These report type="page" but subtype="iframe", which previously caused
+		# them to be treated as top-level pages. That resulted in the agent focus
+		# switching to iframe targets, breaking commands that require a top-level
+		# page (screenshots, navigation, etc.). Keep track of the subtype so that
+		# we can treat OOPIFs like iframes unless explicitly requested.
+		target_subtype = target_info.get('subtype') or target_info.get('subType') or ''
 		url = target_info.get('url', '')
 
 		url_allowed, type_allowed = False, False
@@ -1983,8 +1990,17 @@ class BrowserSession(BaseModel):
 		if target_type in ('service_worker', 'shared_worker', 'worker') and include_workers:
 			type_allowed = True
 
-		if target_type in ('page', 'tab') and include_pages:
-			type_allowed = True
+		if target_type in ('page', 'tab'):
+			if target_subtype == 'iframe':
+				# Out-of-process iframes (OOPIFs) expose themselves as
+				# type="page" but subtype="iframe". Only allow these
+				# when iframe targets are requested, otherwise they are
+				# treated as regular iframes and excluded from the list of
+				# top-level pages used for navigation/tab focus.
+				if include_iframes:
+					type_allowed = True
+			elif include_pages:
+				type_allowed = True
 
 		if target_type in ('iframe', 'webview') and include_iframes:
 			type_allowed = True
