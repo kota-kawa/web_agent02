@@ -52,9 +52,10 @@ body::before {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, clamp(340px, 25vw, 420px)) minmax(0, 1fr);
   gap: clamp(16px, 2.4vw, 26px);
-  width: min(1680px, 100%);
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   height: calc(100vh - clamp(32px, 5vw, 60px));
   height: calc(100dvh - clamp(32px, 5vw, 60px));
