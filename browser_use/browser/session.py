@@ -927,18 +927,18 @@ class BrowserSession(BaseModel):
 
 	# ========== Helper Methods ==========
 	@observe_debug(ignore_input=True, ignore_output=True, name='get_browser_state_summary')
-	async def get_browser_state_summary(
-		self,
-		cache_clickable_elements_hashes: bool = True,
-		include_screenshot: bool = True,
-		cached: bool = False,
-		include_recent_events: bool = False,
-	) -> BrowserStateSummary:
-		if cached and self._cached_browser_state_summary is not None and self._cached_browser_state_summary.dom_state:
-			# Don't use cached state if it has 0 interactive elements
-			selector_map = self._cached_browser_state_summary.dom_state.selector_map
+        async def get_browser_state_summary(
+                self,
+                cache_clickable_elements_hashes: bool = True,
+                include_screenshot: bool = True,
+                cached: bool = False,
+                include_recent_events: bool = False,
+        ) -> BrowserStateSummary:
+                if cached and self._cached_browser_state_summary is not None and self._cached_browser_state_summary.dom_state:
+                        # Don't use cached state if it has 0 interactive elements
+                        selector_map = self._cached_browser_state_summary.dom_state.selector_map
 
-			# Don't use cached state if we need a screenshot but the cached state doesn't have one
+                        # Don't use cached state if we need a screenshot but the cached state doesn't have one
 			if include_screenshot and not self._cached_browser_state_summary.screenshot:
 				self.logger.debug('⚠️ Cached browser state has no screenshot, fetching fresh state with screenshot')
 				# Fall through to fetch fresh state with screenshot
@@ -946,14 +946,38 @@ class BrowserSession(BaseModel):
 				self.logger.debug('🔄 Using pre-cached browser state summary for open tab')
 				return self._cached_browser_state_summary
 			else:
-				self.logger.debug('⚠️ Cached browser state has 0 interactive elements, fetching fresh state')
-				# Fall through to fetch fresh state
+                                self.logger.debug('⚠️ Cached browser state has 0 interactive elements, fetching fresh state')
+                                # Fall through to fetch fresh state
 
-		# Dispatch the event and wait for result
-		event: BrowserStateRequestEvent = cast(
-			BrowserStateRequestEvent,
-			self.event_bus.dispatch(
-				BrowserStateRequestEvent(
+                # Ensure DOM watchdog handlers are registered before dispatching the event
+                handlers = self.event_bus.handlers.get('BrowserStateRequestEvent', [])
+                if not handlers:
+                        self.logger.warning(
+                                'No BrowserStateRequestEvent handlers registered. Attempting to reattach watchdogs before '
+                                'requesting browser state.'
+                        )
+                        if hasattr(self, '_watchdogs_attached'):
+                                self._watchdogs_attached = False
+
+                        await self.attach_all_watchdogs()
+
+                        handlers = self.event_bus.handlers.get('BrowserStateRequestEvent', [])
+                        if handlers:
+                                handler_names = [getattr(handler, '__name__', str(handler)) for handler in handlers]
+                                self.logger.info(
+                                        'Restored BrowserStateRequestEvent handlers: %s',
+                                        handler_names,
+                                )
+                        else:
+                                raise RuntimeError(
+                                        'Failed to register BrowserStateRequestEvent handler even after reattaching watchdogs.'
+                                )
+
+                # Dispatch the event and wait for result
+                event: BrowserStateRequestEvent = cast(
+                        BrowserStateRequestEvent,
+                        self.event_bus.dispatch(
+                                BrowserStateRequestEvent(
 					include_dom=True,
 					include_screenshot=include_screenshot,
 					cache_clickable_elements_hashes=cache_clickable_elements_hashes,
