@@ -419,7 +419,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Event bus with WAL persistence
 		# Default to ~/.config/browseruse/events/{agent_session_id}.jsonl
 		# wal_path = CONFIG.BROWSER_USE_CONFIG_DIR / 'events' / f'{self.session_id}.jsonl'
-		self.eventbus = EventBus(name=self._generate_eventbus_name())
+		self.eventbus = self._create_eventbus()
 
 		# Cloud sync service
 		self.enable_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
@@ -445,23 +445,63 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
 
-	def _generate_eventbus_name(self) -> str:
-		"""Create a valid and stable EventBus name derived from the agent id."""
+	def _generate_eventbus_name(self, *, force_random: bool = False) -> str:
+		"""Create a valid EventBus name.
 
-		# Keep only alphanumeric characters so the identifier check passes
-		suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
-		suffix = suffix_source[-8:] if suffix_source else ''
-		name = f'Agent_{suffix}' if suffix else ''
+		When ``force_random`` is False we try to derive a deterministic
+		suffix from ``self.id`` so the name is stable across runs. If
+		the derived value is empty or invalid we fall back to a random
+		UUID-based suffix. When ``force_random`` is True we skip the
+		deterministic branch entirely and always return a fresh random
+		identifier. All returned names are guaranteed to satisfy
+		:py:meth:`str.isidentifier`.
+		"""
 
-		# If sanitizing removed everything or we somehow produced an invalid identifier, retry with UUIDs
-		while not suffix or not name.isidentifier():
-			fallback = uuid7str().replace('-', '')
-			suffix = fallback[-8:]
-			name = f'Agent_{suffix}'
+		suffix: str = ''
 
-		assert name.isidentifier(), f'Failed to generate valid EventBus name: {name}'
-		return name
+		if not force_random:
+			# Keep only alphanumeric characters so the identifier check passes
+			suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
+			suffix = suffix_source[-8:] if suffix_source else ''
 
+		if not suffix:
+			suffix = uuid7str().replace('-', '')[-8:]
+
+		name = f'Agent_{suffix}'
+		name = name.replace('-', '_')
+
+		if name.isidentifier():
+			return name
+
+		# Final fallback: use a fresh UUID, stripped of hyphens, which always
+		# yields an alphanumeric suffix and therefore a valid identifier.
+		fallback_suffix = uuid7str().replace('-', '')
+		fallback_name = f'Agent_{fallback_suffix}'
+		assert fallback_name.isidentifier(), f'Failed to generate valid EventBus name: {fallback_name}'
+		return fallback_name
+
+	def _create_eventbus(self) -> EventBus:
+		"""Instantiate an :class:`EventBus` with a safe name.
+
+		``EventBus`` instances expect ``name`` to be both a Python
+		identifier and unique within the process. If name generation
+		unexpectedly produces an invalid value we retry once with a
+		random identifier and log the failure for debugging purposes.
+		"""
+
+		preferred_name = self._generate_eventbus_name()
+
+		try:
+			return EventBus(name=preferred_name)
+		except (ValueError, AssertionError) as exc:
+			fallback_name = self._generate_eventbus_name(force_random=True)
+			logger.warning(
+				'Failed to create EventBus with name %s (%s). Using fallback name %s',
+				preferred_name,
+				exc,
+				fallback_name,
+			)
+			return EventBus(name=fallback_name)
 	@property
 	def logger(self) -> logging.Logger:
 		"""Get instance-specific logger with task ID in the name"""
@@ -629,19 +669,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Only recreate the event bus when we're not actively running (the previous run shut it down)
 		if not self.running:
-			generated_name = self._generate_eventbus_name()
-			try:
-				self.eventbus = EventBus(name=generated_name)
-			except ValueError as exc:
-				fallback_suffix = uuid7str().replace('-', '')
-				fallback_name = f'Agent_{fallback_suffix}'
-				self.logger.warning(
-					'Failed to recreate EventBus with name %s (%s). Using fallback name %s',
-					generated_name,
-					exc,
-					fallback_name,
-				)
-				self.eventbus = EventBus(name=fallback_name)
+			self.eventbus = self._create_eventbus()
 
 			# Re-register cloud sync handler if it exists (if not disabled)
 			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
