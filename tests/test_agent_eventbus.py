@@ -22,8 +22,8 @@ def test_generate_eventbus_name_from_uuid_like_string():
 
         assert name.startswith('Agent_')
         assert name.isidentifier()
-        # Ensure the suffix is derived from the original identifier without hyphens
-        filtered_id = ''.join(ch for ch in agent.id if ch.isalnum())
+        # Ensure the suffix is derived from the sanitized identifier without hyphens
+        filtered_id = re.sub(r'[^0-9A-Za-z_]', '', agent.id)
         assert name.endswith(filtered_id[-8:])
 
 
@@ -48,7 +48,7 @@ def test_generate_eventbus_name_from_mixed_characters():
         assert name.startswith('Agent_')
         assert name.isidentifier()
         # Ensure only valid identifier characters remain after sanitization
-        assert re.fullmatch(r'Agent_[0-9A-Za-z]+', name)
+        assert re.fullmatch(r'Agent_[0-9A-Za-z_]+', name)
 
 
 def test_generate_eventbus_name_with_agent_prefix():
@@ -60,6 +60,18 @@ def test_generate_eventbus_name_with_agent_prefix():
         assert name.isidentifier()
         assert name != 'Agent_-6855e970a142'
         assert '-6855' not in name
+
+
+def test_generate_eventbus_name_with_prefixed_uuid_like_agent_id():
+        agent = create_agent_with_id('Agent_7e30-8000-f091b1c8050b')
+
+        name = agent._generate_eventbus_name()
+
+        assert name.startswith('Agent_')
+        assert name.isidentifier()
+
+        sanitized = re.sub(r'[^0-9A-Za-z_]', '', agent.id)
+        assert name == f'Agent_{sanitized[-8:]}'
 
 
 def test_create_eventbus_recovers_from_invalid_name():

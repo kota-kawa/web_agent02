@@ -473,18 +473,18 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""Generate a random, guaranteed identifier-compliant EventBus name."""
 
 		while True:
-			fallback_suffix = uuid7str().replace('-', '')
-			if not fallback_suffix:
+			fallback_source = re.sub(r'[^0-9A-Za-z_]', '', uuid7str())
+			if not fallback_source:
 				continue
 
-			candidate = f'Agent_{fallback_suffix[-8:]}'
+			candidate = f'Agent_{fallback_source[-8:]}'
 			if candidate.isidentifier():
 				return candidate
 
 	def _generate_eventbus_name(self) -> str:
 		"""Create a valid and stable EventBus name derived from the agent id."""
 
-		suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
+		suffix_source = re.sub(r'[^0-9A-Za-z_]', '', str(self.id))
 
 		if suffix_source:
 			suffix = suffix_source[-8:]
@@ -493,10 +493,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				return name
 
 			logger.warning(
-				'Failed to use agent id %s for EventBus name because "%s" is not a valid identifier. ' 'Falling back to a random suffix.',
+				'Failed to use agent id %s for EventBus name because "%s" is not a valid identifier. '
+				'Falling back to a random suffix.',
 				self.id,
 				name,
 			)
+			return self._generate_random_eventbus_name()
 
 		return self._generate_random_eventbus_name()
 
@@ -668,7 +670,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Only recreate the event bus when we're not actively running (the previous run shut it down)
 		if not self.running:
-			self.eventbus = self._create_eventbus()
+			try:
+				self.eventbus = self._create_eventbus()
+			except (AssertionError, RuntimeError) as exc:
+				self.logger.warning(
+					'Failed to recreate EventBus for agent %s due to identifier validation error: %s. '
+					'Falling back to a random identifier.',
+					self.id,
+					exc,
+				)
+				fallback_name = self._generate_random_eventbus_name()
+				self.eventbus = EventBus(name=fallback_name)
 
 			# Re-register cloud sync handler if it exists (if not disabled)
 			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
