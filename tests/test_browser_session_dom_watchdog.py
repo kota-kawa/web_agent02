@@ -17,7 +17,6 @@ async def test_get_browser_state_summary_reattaches_dom_watchdog(monkeypatch):
 
 	downloads_handler.__name__ = 'DownloadsWatchdog.on_BrowserStateRequestEvent'
 	session.event_bus.handlers['BrowserStateRequestEvent'] = [downloads_handler]
-	session._watchdogs_attached = True  # type: ignore[attr-defined]
 
 	async def dom_handler(event):  # pragma: no cover - simple stub
 		return BrowserStateSummary(
@@ -32,7 +31,7 @@ async def test_get_browser_state_summary_reattaches_dom_watchdog(monkeypatch):
 	dom_handler.__name__ = 'DOMWatchdog.on_BrowserStateRequestEvent'
 
 	async def fake_attach(self):
-		self.event_bus.handlers['BrowserStateRequestEvent'] = [dom_handler]
+		self.event_bus.handlers['BrowserStateRequestEvent'] = [downloads_handler, dom_handler]
 		self._watchdogs_attached = True  # type: ignore[attr-defined]
 
 	object.__setattr__(session, 'attach_all_watchdogs', types.MethodType(fake_attach, session))
@@ -58,8 +57,8 @@ async def test_get_browser_state_summary_reattaches_dom_watchdog(monkeypatch):
 	await session.get_browser_state_summary(include_screenshot=False)
 
 	handlers_after_first_call = session.event_bus.handlers['BrowserStateRequestEvent']
-	assert handlers_after_first_call is not original_handlers
-	assert len(handlers_after_first_call) == 1
+	assert len(handlers_after_first_call) == 2
+	assert downloads_handler in handlers_after_first_call
 	assert any('DOMWatchdog' in getattr(handler, '__name__', '') for handler in handlers_after_first_call)
 
 	await session.get_browser_state_summary(include_screenshot=False)

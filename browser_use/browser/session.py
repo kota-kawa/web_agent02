@@ -990,20 +990,53 @@ class BrowserSession(BaseModel):
 					'Failed to register DOMWatchdog BrowserStateRequestEvent handler even after reattaching watchdogs.'
 				)
 
-		event: BrowserStateRequestEvent = cast(
-			BrowserStateRequestEvent,
-			self.event_bus.dispatch(
-				BrowserStateRequestEvent(
-					include_dom=True,
-					include_screenshot=include_screenshot,
-					cache_clickable_elements_hashes=cache_clickable_elements_hashes,
-					include_recent_events=include_recent_events,
-				)
-			),
-		)
+		def _dispatch_browser_state_event() -> BrowserStateRequestEvent:
+			return cast(
+				BrowserStateRequestEvent,
+				self.event_bus.dispatch(
+					BrowserStateRequestEvent(
+						include_dom=True,
+						include_screenshot=include_screenshot,
+						cache_clickable_elements_hashes=cache_clickable_elements_hashes,
+						include_recent_events=include_recent_events,
+					)
+				),
+			)
+
+		event = _dispatch_browser_state_event()
 
 		# The handler returns the BrowserStateSummary directly
-		result = await event.event_result(raise_if_none=True, raise_if_any=True)
+		try:
+			result = await event.event_result(raise_if_none=True, raise_if_any=True)
+		except ValueError as exc:
+			error_message = str(exc)
+			if 'Expected at least one handler to return a non-None result' not in error_message:
+				raise
+
+			self.logger.warning(
+				'BrowserStateRequestEvent returned no handler results; reattaching watchdogs and retrying.'
+			)
+
+			if hasattr(self, '_watchdogs_attached'):
+				self._watchdogs_attached = False
+
+			await self.attach_all_watchdogs()
+
+			handlers = self.event_bus.handlers.get('BrowserStateRequestEvent', [])
+			dom_handler_present = any(
+				'DOMWatchdog' in getattr(handler, '__name__', '')
+				or getattr(getattr(handler, '__self__', None), '__class__', None).__name__ == 'DOMWatchdog'
+				for handler in handlers
+			)
+
+			if not dom_handler_present:
+				raise RuntimeError(
+					'Failed to register DOMWatchdog BrowserStateRequestEvent handler even after retrying.'
+				) from exc
+
+			event = _dispatch_browser_state_event()
+			result = await event.event_result(raise_if_none=True, raise_if_any=True)
+
 		assert result is not None and result.dom_state is not None
 		return result
 
