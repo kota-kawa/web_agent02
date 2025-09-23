@@ -1,10 +1,12 @@
 import re
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from browser_use.agent.service import Agent
+from bubus import EventBus
 
 
 def create_agent_with_id(identifier: str) -> Agent:
@@ -48,3 +50,19 @@ def test_generate_eventbus_name_from_mixed_characters():
         assert name.isidentifier()
         # Ensure only valid identifier characters remain after sanitization
         assert re.fullmatch(r'Agent_[0-9A-Za-z]+', name)
+
+
+def test_create_eventbus_falls_back_to_random_name():
+        agent = create_agent_with_id('irrelevant')
+
+        # Force _generate_eventbus_name to produce an invalid identifier first,
+        # then a valid fallback when force_random=True is requested.
+        def fake_generate(self, *, force_random: bool = False) -> str:
+                return 'Agent_validfallback' if force_random else 'Agent_invalid-name'
+
+        agent._generate_eventbus_name = types.MethodType(fake_generate, agent)  # type: ignore[attr-defined]
+
+        bus = agent._create_eventbus()
+
+        assert isinstance(bus, EventBus)
+        assert bus.name == 'Agent_validfallback'
