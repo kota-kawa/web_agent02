@@ -679,6 +679,13 @@ class BrowserAgentController:
     async def _run_agent(self, task: str) -> AgentRunResult:
         session = await self._ensure_browser_session()
 
+        attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
+        if attach_watchdogs is not None:
+            try:
+                await attach_watchdogs()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to pre-attach browser watchdogs', exc_info=True)
+
         step_message_ids: dict[int, int] = {}
 
         def handle_new_step(
@@ -743,7 +750,7 @@ class BrowserAgentController:
             return AgentRunResult(history=history, step_message_ids=step_message_ids)
         finally:
             keep_alive = session.browser_profile.keep_alive
-            if keep_alive:
+            if not keep_alive:
                 with suppress(Exception):
                     await session.stop()
             with self._state_lock:
