@@ -480,7 +480,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		assert fallback_name.isidentifier(), f'Failed to generate valid EventBus name: {fallback_name}'
 		return fallback_name
 
-	def _create_eventbus(self) -> EventBus:
+	def _create_eventbus(self, *, force_random: bool = False) -> EventBus:
 		"""Instantiate an :class:`EventBus` with a safe name.
 
 		``EventBus`` instances expect ``name`` to be both a Python
@@ -489,7 +489,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		random identifier and log the failure for debugging purposes.
 		"""
 
-		preferred_name = self._generate_eventbus_name()
+		preferred_name = self._generate_eventbus_name(force_random=force_random)
 
 		try:
 			return EventBus(name=preferred_name)
@@ -669,7 +669,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Only recreate the event bus when we're not actively running (the previous run shut it down)
 		if not self.running:
-			self.eventbus = self._create_eventbus()
+			# Force a fresh identifier for follow-up runs so we never reuse the
+			# name from the previous execution. Some EventBus implementations
+			# keep strong references to prior instances, so generating a new
+			# random suffix avoids spurious "name must be unique" assertions
+			# when the agent is invoked multiple times.
+			self.eventbus = self._create_eventbus(force_random=True)
 
 			# Re-register cloud sync handler if it exists (if not disabled)
 			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
