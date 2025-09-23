@@ -652,6 +652,7 @@ class BrowserAgentController:
         self._paused = False
         self._step_message_ids: dict[int, int] = {}
         self._step_message_lock = threading.Lock()
+        self._resume_url: str | None = None
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -747,6 +748,7 @@ class BrowserAgentController:
             self._paused = False
         try:
             history = await agent.run(max_steps=self._max_steps)
+            self._update_resume_url_from_history(history)
             return AgentRunResult(history=history, step_message_ids=step_message_ids)
         finally:
             keep_alive = session.browser_profile.keep_alive
@@ -834,6 +836,30 @@ class BrowserAgentController:
         if cleared:
             self._logger.debug('Cleared completion state for follow-up agent run.')
 
+        resume_url = self._get_resume_url()
+        prepared_resume = False
+
+        if resume_url:
+            try:
+                agent.initial_url = resume_url
+                agent.initial_actions = agent._convert_initial_actions(
+                    [{'go_to_url': {'url': resume_url, 'new_tab': False}}]
+                )
+                agent.state.follow_up_task = False
+                prepared_resume = True
+                self._logger.debug('Prepared follow-up run to resume at %s.', resume_url)
+            except Exception:  # noqa: BLE001
+                self._logger.debug(
+                    'Failed to prepare resume navigation to %s',
+                    resume_url,
+                    exc_info=True,
+                )
+                agent.initial_actions = None
+
+        if not prepared_resume:
+            agent.initial_actions = None
+            agent.state.follow_up_task = True
+
     def _record_step_message_id(self, step_number: int, message_id: int) -> None:
         with self._step_message_lock:
             self._step_message_ids[step_number] = message_id
@@ -845,6 +871,42 @@ class BrowserAgentController:
     def _clear_step_message_ids(self) -> None:
         with self._step_message_lock:
             self._step_message_ids.clear()
+
+    def _set_resume_url(self, url: str | None) -> None:
+        with self._state_lock:
+            self._resume_url = url
+
+    def _get_resume_url(self) -> str | None:
+        with self._state_lock:
+            return self._resume_url
+
+    def _update_resume_url_from_history(self, history: AgentHistoryList) -> None:
+        resume_url: str | None = None
+        try:
+            for entry in reversed(history.history):
+                state = getattr(entry, 'state', None)
+                if state is None:
+                    continue
+                url = getattr(state, 'url', None)
+                if not url:
+                    continue
+                normalized = url.strip()
+                if not normalized:
+                    continue
+                lowered = normalized.lower()
+                if lowered.startswith('about:') or lowered.startswith('chrome-error://'):
+                    continue
+                if lowered.startswith('chrome://') or lowered.startswith('devtools://'):
+                    continue
+                resume_url = normalized
+                break
+        except Exception:  # noqa: BLE001
+            self._logger.debug('Failed to derive resume URL from agent history.', exc_info=True)
+            return
+
+        self._set_resume_url(resume_url)
+        if resume_url:
+            self._logger.debug('Recorded resume URL for follow-up runs: %s', resume_url)
 
     def remember_step_message_id(self, step_number: int, message_id: int) -> None:
         self._record_step_message_id(step_number, message_id)
@@ -905,6 +967,7 @@ class BrowserAgentController:
             self._agent = None
             self._current_agent = None
             self._paused = False
+        self._set_resume_url(None)
         self._clear_step_message_ids()
 
     def run(self, task: str) -> AgentRunResult:
@@ -928,6 +991,7 @@ class BrowserAgentController:
             self._agent = None
             self._current_agent = None
             self._paused = False
+        self._set_resume_url(None)
         self._clear_step_message_ids()
 
         if self._loop.is_running():
