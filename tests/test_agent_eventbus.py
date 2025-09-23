@@ -1,3 +1,4 @@
+import asyncio
 import re
 import sys
 from pathlib import Path
@@ -48,3 +49,31 @@ def test_generate_eventbus_name_from_mixed_characters():
         assert name.isidentifier()
         # Ensure only valid identifier characters remain after sanitization
         assert re.fullmatch(r'Agent_[0-9A-Za-z]+', name)
+
+
+def test_generate_eventbus_name_with_agent_prefix():
+        agent = create_agent_with_id('Agent_-6855e970a142')
+
+        name = agent._generate_eventbus_name()
+
+        assert name.startswith('Agent_')
+        assert name.isidentifier()
+        assert name != 'Agent_-6855e970a142'
+        assert '-6855' not in name
+
+
+def test_create_eventbus_recovers_from_invalid_name():
+        agent = create_agent_with_id('ignored')
+
+        def bad_name(self):
+                return 'Agent_-invalid-name'
+
+        agent._generate_eventbus_name = bad_name.__get__(agent, Agent)
+
+        event_bus = agent._create_eventbus()
+
+        assert event_bus.name.isidentifier()
+        assert event_bus.name != 'Agent_-invalid-name'
+
+        # Clean up to avoid leaking EventBus instances across tests
+        asyncio.run(event_bus.stop(clear=True))
