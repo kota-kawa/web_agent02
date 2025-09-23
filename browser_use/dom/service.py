@@ -135,7 +135,15 @@ class DomService:
 
 	async def _get_viewport_ratio(self, target_id: TargetID) -> float:
 		"""Get viewport dimensions, device pixel ratio, and scroll position using CDP."""
-		cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target_id, focus=True)
+
+		# Remember the currently focused target so we can restore it if needed
+		previous_focus_target: TargetID | None = None
+		if self.browser_session.agent_focus:
+			previous_focus_target = self.browser_session.agent_focus.target_id
+
+		# Never change the agent focus when collecting viewport data – this helper can be
+		# executed for cross-origin iframes while the agent is working in another tab.
+		cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target_id, focus=False)
 
 		try:
 			# Get the layout metrics which includes the visual viewport
@@ -161,6 +169,19 @@ class DomService:
 			self.logger.debug(f'Viewport size detection failed: {e}')
 			# Fallback to default viewport size
 			return 1.0
+		finally:
+			# Restore the previous focus if it changed while collecting metrics
+			if (
+				previous_focus_target
+				and self.browser_session.agent_focus
+				and self.browser_session.agent_focus.target_id != previous_focus_target
+			):
+				try:
+					await self.browser_session.get_or_create_cdp_session(
+						target_id=previous_focus_target, focus=True
+					)
+				except Exception as restore_error:
+					self.logger.debug(f'Failed to restore focus after viewport lookup: {restore_error}')
 
 	@classmethod
 	def is_element_visible_according_to_all_parents(
