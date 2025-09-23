@@ -629,7 +629,19 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Only recreate the event bus when we're not actively running (the previous run shut it down)
 		if not self.running:
-			self.eventbus = EventBus(name=self._generate_eventbus_name())
+			generated_name = self._generate_eventbus_name()
+			try:
+				self.eventbus = EventBus(name=generated_name)
+			except ValueError as exc:
+				fallback_suffix = uuid7str().replace('-', '')
+				fallback_name = f'Agent_{fallback_suffix}'
+				self.logger.warning(
+					'Failed to recreate EventBus with name %s (%s). Using fallback name %s',
+					generated_name,
+					exc,
+					fallback_name,
+				)
+				self.eventbus = EventBus(name=fallback_name)
 
 			# Re-register cloud sync handler if it exists (if not disabled)
 			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:

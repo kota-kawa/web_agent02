@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -360,8 +361,17 @@ def _format_step_entry(index: int, step: Any) -> str:
     return '\n'.join(lines)
 
 
-def _format_history_messages(history: AgentHistoryList) -> list[str]:
-    return [_format_step_entry(index, step) for index, step in enumerate(history.history, start=1)]
+def _format_history_messages(history: AgentHistoryList) -> list[tuple[int, str]]:
+    formatted: list[tuple[int, str]] = []
+    next_index = 1
+    for step in history.history:
+        metadata = getattr(step, 'metadata', None)
+        step_number = getattr(metadata, 'step_number', None) if metadata else None
+        if not isinstance(step_number, int) or step_number < 1:
+            step_number = next_index
+        formatted.append((step_number, _format_step_entry(step_number, step)))
+        next_index = step_number + 1
+    return formatted
 
 
 def _format_step_plan(
@@ -619,6 +629,7 @@ def _resolve_cdp_url() -> str | None:
 class AgentRunResult:
     history: AgentHistoryList
     step_message_ids: dict[int, int] = field(default_factory=dict)
+    filtered_history: AgentHistoryList | None = None
 
 
 class BrowserAgentController:
@@ -688,6 +699,8 @@ class BrowserAgentController:
                 self._logger.debug('Failed to pre-attach browser watchdogs', exc_info=True)
 
         step_message_ids: dict[int, int] = {}
+        starting_step_number = 1
+        history_start_index = 0
 
         def handle_new_step(
             state_summary: BrowserStateSummary,
@@ -695,11 +708,14 @@ class BrowserAgentController:
             step_number: int,
         ) -> None:
             try:
-                content = _format_step_plan(step_number, state_summary, model_output)
+                relative_step = step_number - starting_step_number + 1
+                if relative_step < 1:
+                    relative_step = 1
+                content = _format_step_plan(relative_step, state_summary, model_output)
                 message = _append_history_message('assistant', content)
                 message_id = int(message['id'])
-                step_message_ids[step_number] = message_id
-                self.remember_step_message_id(step_number, message_id)
+                step_message_ids[relative_step] = message_id
+                self.remember_step_message_id(relative_step, message_id)
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to broadcast step update', exc_info=True)
 
@@ -742,6 +758,12 @@ class BrowserAgentController:
             except Exception as exc:  # noqa: BLE001
                 raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
 
+        history_items = getattr(agent, 'history', None)
+        if history_items is not None:
+            history_start_index = len(history_items.history)
+        starting_step_number = getattr(getattr(agent, 'state', None), 'n_steps', 1) or 1
+        self._clear_step_message_ids()
+
         with self._state_lock:
             self._current_agent = agent
             self._is_running = True
@@ -749,7 +771,32 @@ class BrowserAgentController:
         try:
             history = await agent.run(max_steps=self._max_steps)
             self._update_resume_url_from_history(history)
-            return AgentRunResult(history=history, step_message_ids=step_message_ids)
+            new_entries = history.history[history_start_index:]
+            filtered_entries = [
+                entry
+                for entry in new_entries
+                if not getattr(entry, 'metadata', None)
+                or getattr(entry.metadata, 'step_number', None) != 0
+            ]
+            if filtered_entries or not new_entries:
+                relevant_entries = filtered_entries
+            else:
+                relevant_entries = new_entries
+            if isinstance(history, AgentHistoryList):
+                history_kwargs = {'history': relevant_entries}
+                if hasattr(history, 'usage'):
+                    history_kwargs['usage'] = getattr(history, 'usage')
+                filtered_history = history.__class__(**history_kwargs)
+                if hasattr(history, '_output_model_schema'):
+                    filtered_history._output_model_schema = history._output_model_schema
+            else:
+                filtered_history = copy.copy(history)
+                setattr(filtered_history, 'history', relevant_entries)
+            return AgentRunResult(
+                history=history,
+                step_message_ids=step_message_ids,
+                filtered_history=filtered_history,
+            )
         finally:
             keep_alive = session.browser_profile.keep_alive
             if not keep_alive:
@@ -1115,7 +1162,7 @@ def chat() -> ResponseReturnValue:
             )
 
         run_result = controller.run(prompt)
-        agent_history = run_result.history
+        agent_history = run_result.filtered_history or run_result.history
     except AgentControllerError as exc:
         message = f'エージェントの実行に失敗しました: {exc}'
         logger.warning(message)
@@ -1146,18 +1193,18 @@ def chat() -> ResponseReturnValue:
         return jsonify({'messages': _copy_history(), 'run_summary': error_message}), 200
 
     step_messages = _format_history_messages(agent_history)
-    for index, content in enumerate(step_messages, start=1):
-        message_id = run_result.step_message_ids.get(index)
+    for step_number, content in step_messages:
+        message_id = run_result.step_message_ids.get(step_number)
         if message_id is None:
-            message_id = controller.get_step_message_id(index)
+            message_id = controller.get_step_message_id(step_number)
         if message_id is not None:
             _update_history_message(message_id, content)
-            controller.remember_step_message_id(index, message_id)
+            controller.remember_step_message_id(step_number, message_id)
         else:
             appended = _append_history_message('assistant', content)
             new_id = int(appended['id'])
-            controller.remember_step_message_id(index, new_id)
-            run_result.step_message_ids[index] = new_id
+            controller.remember_step_message_id(step_number, new_id)
+            run_result.step_message_ids[step_number] = new_id
 
     summary_message = _summarize_history(agent_history)
     _append_history_message('assistant', summary_message)
