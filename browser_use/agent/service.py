@@ -419,7 +419,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Event bus with WAL persistence
 		# Default to ~/.config/browseruse/events/{agent_session_id}.jsonl
 		# wal_path = CONFIG.BROWSER_USE_CONFIG_DIR / 'events' / f'{self.session_id}.jsonl'
-		self.eventbus = EventBus(name=self._generate_eventbus_name())
+		self.eventbus = self._create_eventbus()
 
 		# Cloud sync service
 		self.enable_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
@@ -445,22 +445,61 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
 
+	def _create_eventbus(self) -> EventBus:
+		"""Create an EventBus instance with a safe, valid identifier name."""
+
+		attempt_name = self._generate_eventbus_name()
+		last_error: AssertionError | None = None
+
+		for attempt in range(3):
+			try:
+				return EventBus(name=attempt_name)
+			except AssertionError as exc:
+				last_error = exc
+				logger.warning(
+					'Invalid EventBus name "%s" for agent %s on attempt %d: %s. Regenerating.',
+					attempt_name,
+					self.id,
+					attempt + 1,
+					exc,
+				)
+				attempt_name = self._generate_random_eventbus_name()
+
+		raise RuntimeError(
+			f'Failed to generate a valid EventBus name for agent {self.id}'
+		) from last_error
+
+	def _generate_random_eventbus_name(self) -> str:
+		"""Generate a random, guaranteed identifier-compliant EventBus name."""
+
+		while True:
+			fallback_suffix = uuid7str().replace('-', '')
+			if not fallback_suffix:
+				continue
+
+			candidate = f'Agent_{fallback_suffix[-8:]}'
+			if candidate.isidentifier():
+				return candidate
+
 	def _generate_eventbus_name(self) -> str:
 		"""Create a valid and stable EventBus name derived from the agent id."""
 
-		# Keep only alphanumeric characters so the identifier check passes
 		suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
-		suffix = suffix_source[-8:] if suffix_source else ''
-		name = f'Agent_{suffix}' if suffix else ''
 
-		# If sanitizing removed everything or we somehow produced an invalid identifier, retry with UUIDs
-		while not suffix or not name.isidentifier():
-			fallback = uuid7str().replace('-', '')
-			suffix = fallback[-8:]
+		if suffix_source:
+			suffix = suffix_source[-8:]
 			name = f'Agent_{suffix}'
+			if name.isidentifier():
+				return name
 
-		assert name.isidentifier(), f'Failed to generate valid EventBus name: {name}'
-		return name
+			logger.warning(
+				'Failed to use agent id %s for EventBus name because "%s" is not a valid identifier. ' 'Falling back to a random suffix.',
+				self.id,
+				name,
+			)
+
+		return self._generate_random_eventbus_name()
+
 
 	@property
 	def logger(self) -> logging.Logger:
@@ -629,7 +668,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Only recreate the event bus when we're not actively running (the previous run shut it down)
 		if not self.running:
-			self.eventbus = EventBus(name=self._generate_eventbus_name())
+			self.eventbus = self._create_eventbus()
 
 			# Re-register cloud sync handler if it exists (if not disabled)
 			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
