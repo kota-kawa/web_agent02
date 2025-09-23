@@ -357,19 +357,23 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		import aiohttp
 
 		start_time = asyncio.get_event_loop().time()
+		timeout_config = aiohttp.ClientTimeout(total=1)
 
-		while asyncio.get_event_loop().time() - start_time < timeout:
-			try:
-				async with aiohttp.ClientSession() as session:
+		async with aiohttp.ClientSession(timeout=timeout_config) as session:
+			while asyncio.get_event_loop().time() - start_time < timeout:
+				try:
 					async with session.get(f'http://localhost:{port}/json/version') as resp:
 						if resp.status == 200:
 							# Chrome is ready
 							return f'http://localhost:{port}/'
-						else:
-							# Chrome is starting up and returning 502/500 errors
-							await asyncio.sleep(0.1)
-			except Exception:
-				# Connection error - Chrome might not be ready yet
+				except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+					# Connection error - Chrome might not be ready yet
+					pass
+				except Exception:
+					# Catch-all to ensure the session context closes cleanly
+					pass
+
+				# Chrome is starting up and returning errors or connection failed
 				await asyncio.sleep(0.1)
 
 		raise TimeoutError(f'Browser did not start within {timeout} seconds')
