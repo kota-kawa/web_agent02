@@ -145,3 +145,21 @@ def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
     assert agent._pending_eventbus_refresh is False
 
     _stop_eventbus(refreshed_bus)
+
+
+def test_create_eventbus_sanitizes_invalid_names() -> None:
+    agent = _make_agent()
+
+    def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
+        return "Agent_c0c-5d6e-79d3-8000-5738eda3c6a7"
+
+    agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
+
+    bus = agent._create_eventbus()
+
+    try:
+        assert isinstance(bus, EventBus)
+        assert bus.name.isidentifier()
+        assert "-" not in bus.name
+    finally:
+        _stop_eventbus(bus)

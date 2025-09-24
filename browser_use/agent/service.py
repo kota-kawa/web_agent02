@@ -446,16 +446,39 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
 
+	def _sanitize_eventbus_name(self, name: str) -> str:
+		"""Normalize *name* so it always satisfies ``str.isidentifier``.
+
+		The sanitizer keeps alphanumeric characters and underscores,
+		replacing any other character with ``_``. If the resulting
+		string loses all entropy (e.g. becomes just ``"Agent_"``) or is
+		still not a valid identifier, it falls back to a fresh random
+		UUID-based suffix. The returned value always begins with the
+		``Agent_`` prefix so different components can easily recognise
+		the owner of the bus.
+		"""
+
+		sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in name)
+
+		if not sanitized.startswith('Agent_'):
+			sanitized = f'Agent_{sanitized}'
+
+		if sanitized in {'Agent_', 'Agent'} or not sanitized.isidentifier():
+			random_suffix = uuid7str().replace('-', '')
+			sanitized = f'Agent_{random_suffix}'
+
+		return sanitized
+
 	def _generate_eventbus_name(self, *, force_random: bool = False) -> str:
 		"""Create a valid EventBus name.
 
 		When ``force_random`` is False we try to derive a deterministic
 		suffix from ``self.id`` so the name is stable across runs. If
-		the derived value is empty or invalid we fall back to a random
-		UUID-based suffix. When ``force_random`` is True we skip the
-		deterministic branch entirely and always return a fresh random
-		identifier. All returned names are guaranteed to satisfy
-		:py:meth:`str.isidentifier`.
+		the derived value is empty we fall back to a random UUID-based
+		suffix. When ``force_random`` is True we skip the deterministic
+		branch entirely and always return a fresh random identifier.
+		The sanitizer ensures the final name is a valid Python
+		identifier.
 		"""
 
 		suffix: str = ''
@@ -469,17 +492,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			suffix = uuid7str().replace('-', '')[-8:]
 
 		name = f'Agent_{suffix}'
-		name = name.replace('-', '_')
-
-		if name.isidentifier():
-			return name
-
-		# Final fallback: use a fresh UUID, stripped of hyphens, which always
-		# yields an alphanumeric suffix and therefore a valid identifier.
-		fallback_suffix = uuid7str().replace('-', '')
-		fallback_name = f'Agent_{fallback_suffix}'
-		assert fallback_name.isidentifier(), f'Failed to generate valid EventBus name: {fallback_name}'
-		return fallback_name
+		return self._sanitize_eventbus_name(name)
 
 	def _create_eventbus(self, *, force_random: bool = False) -> EventBus:
 		"""Instantiate an :class:`EventBus` with a safe name.
@@ -488,6 +501,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		identifier and unique within the process. If name generation
 		unexpectedly produces an invalid value we retry once with a
 		random identifier and log the failure for debugging purposes.
+		As a final guard we sanitise the fallback name to ensure the
+		constructor always receives a valid identifier even if a custom
+		``_generate_eventbus_name`` implementation misbehaves.
 		"""
 
 		preferred_name = self._generate_eventbus_name(force_random=force_random)
@@ -495,14 +511,25 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		try:
 			return EventBus(name=preferred_name)
 		except (ValueError, AssertionError) as exc:
-			fallback_name = self._generate_eventbus_name(force_random=True)
+			fallback_candidate = self._generate_eventbus_name(force_random=True)
+			fallback_name = self._sanitize_eventbus_name(fallback_candidate)
 			logger.warning(
 				'Failed to create EventBus with name %s (%s). Using fallback name %s',
 				preferred_name,
 				exc,
 				fallback_name,
 			)
-			return EventBus(name=fallback_name)
+			try:
+				return EventBus(name=fallback_name)
+			except (ValueError, AssertionError) as fallback_exc:
+				emergency_name = self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
+				logger.error(
+					'Fallback EventBus creation failed with name %s (%s). Using emergency name %s',
+					fallback_name,
+					fallback_exc,
+					emergency_name,
+				)
+				return EventBus(name=emergency_name)
 
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
