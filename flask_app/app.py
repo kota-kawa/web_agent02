@@ -664,6 +664,7 @@ class BrowserAgentController:
         self._step_message_ids: dict[int, int] = {}
         self._step_message_lock = threading.Lock()
         self._resume_url: str | None = None
+        self._session_recreated = False
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -672,6 +673,8 @@ class BrowserAgentController:
 
     async def _ensure_browser_session(self) -> BrowserSession:
         if self._browser_session is not None:
+            with self._state_lock:
+                self._session_recreated = False
             return self._browser_session
 
         if not self._cdp_url:
@@ -685,11 +688,21 @@ class BrowserAgentController:
             highlight_elements=True,
             wait_between_actions=0.4,
         )
-        self._browser_session = BrowserSession(browser_profile=profile)
-        return self._browser_session
+        session = BrowserSession(browser_profile=profile)
+        with self._state_lock:
+            self._browser_session = session
+            self._session_recreated = True
+        return session
+
+    def _consume_session_recreated(self) -> bool:
+        with self._state_lock:
+            recreated = self._session_recreated
+            self._session_recreated = False
+        return recreated
 
     async def _run_agent(self, task: str) -> AgentRunResult:
         session = await self._ensure_browser_session()
+        session_recreated = self._consume_session_recreated()
 
         attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
         if attach_watchdogs is not None:
@@ -754,7 +767,7 @@ class BrowserAgentController:
             agent.register_new_step_callback = handle_new_step
             try:
                 agent.add_new_task(task)
-                self._prepare_agent_for_follow_up(agent)
+                self._prepare_agent_for_follow_up(agent, force_resume_navigation=session_recreated)
             except Exception as exc:  # noqa: BLE001
                 raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
 
@@ -848,7 +861,7 @@ class BrowserAgentController:
         except Exception as exc:  # noqa: BLE001
             raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
 
-    def _prepare_agent_for_follow_up(self, agent: Agent) -> None:
+    def _prepare_agent_for_follow_up(self, agent: Agent, *, force_resume_navigation: bool = False) -> None:
         """Clear completion flags so follow-up runs can execute new steps."""
 
         def _clear_done_flag(results: list[ActionResult] | None) -> bool:
@@ -886,7 +899,7 @@ class BrowserAgentController:
         resume_url = self._get_resume_url()
         prepared_resume = False
 
-        if resume_url:
+        if force_resume_navigation and resume_url:
             try:
                 agent.initial_url = resume_url
                 agent.initial_actions = agent._convert_initial_actions(
@@ -904,6 +917,7 @@ class BrowserAgentController:
                 agent.initial_actions = None
 
         if not prepared_resume:
+            agent.initial_url = None
             agent.initial_actions = None
             agent.state.follow_up_task = True
 
