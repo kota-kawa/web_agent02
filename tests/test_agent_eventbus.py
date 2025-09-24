@@ -56,18 +56,29 @@ def test_generate_eventbus_name_from_mixed_characters() -> None:
     assert re.fullmatch(r"Agent_[0-9A-Za-z]+", name)
 
 
-def test_create_eventbus_falls_back_to_random_name() -> None:
-    agent = create_agent_with_id("irrelevant")
+def test_create_eventbus_falls_back_when_sanitizer_is_disabled() -> None:
+	agent = create_agent_with_id("irrelevant")
 
-    def fake_generate(self, *, force_random: bool = False) -> str:  # noqa: D401
-        return "Agent_validfallback" if force_random else "Agent_invalid-name"
+	call_counts = {"default": 0, "random": 0}
 
-    agent._generate_eventbus_name = types.MethodType(fake_generate, agent)  # type: ignore[attr-defined]
+	def fake_generate(self, *, force_random: bool = False) -> str:  # noqa: D401
+		if force_random:
+			call_counts["random"] += 1
+			return "Agent_validfallback"
+		call_counts["default"] += 1
+		return "Agent_invalid-name"
 
-    bus = agent._create_eventbus()
+	def passthrough(self, name: str) -> str:  # noqa: D401
+		return name
 
-    assert isinstance(bus, EventBus)
-    assert bus.name == "Agent_validfallback"
+	agent._generate_eventbus_name = types.MethodType(fake_generate, agent)  # type: ignore[attr-defined]
+	agent._sanitize_eventbus_name = types.MethodType(passthrough, agent)  # type: ignore[attr-defined]
+
+	bus = agent._create_eventbus()
+
+	assert isinstance(bus, EventBus)
+	assert bus.name == "Agent_validfallback"
+	assert call_counts["random"] == 1
 
 
 class DummyLLM:
@@ -122,6 +133,24 @@ def test_add_new_task_assigns_unique_eventbus_names() -> None:
         _stop_eventbus(bus)
 
 
+def test_add_new_task_with_hyphenated_task_id() -> None:
+	agent = _make_agent()
+
+	original_bus = agent.eventbus
+	followup_bus = original_bus
+	try:
+		agent.id = "Agent_8ea-7274-8000-3eb4154ed3e4"
+		agent.task_id = agent.id
+		agent.add_new_task("follow-up hyphen id")
+		followup_bus = agent.eventbus
+		assert followup_bus is not original_bus
+		assert followup_bus.name.isidentifier()
+		assert "-" not in followup_bus.name
+	finally:
+		for bus in {original_bus, followup_bus}:
+			_stop_eventbus(bus)
+
+
 def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
     agent = _make_agent()
 
@@ -148,18 +177,23 @@ def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
 
 
 def test_create_eventbus_sanitizes_invalid_names() -> None:
-    agent = _make_agent()
+	agent = _make_agent()
 
-    def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
-        return "Agent_c0c-5d6e-79d3-8000-5738eda3c6a7"
+	calls = {"random": 0}
 
-    agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
+	def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
+		if force_random:
+			calls["random"] += 1
+		return "Agent_c0c-5d6e-79d3-8000-5738eda3c6a7"
 
-    bus = agent._create_eventbus()
+	agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
 
-    try:
-        assert isinstance(bus, EventBus)
-        assert bus.name.isidentifier()
-        assert "-" not in bus.name
-    finally:
-        _stop_eventbus(bus)
+	bus = agent._create_eventbus()
+
+	try:
+		assert isinstance(bus, EventBus)
+		assert bus.name.isidentifier()
+		assert "-" not in bus.name
+		assert calls["random"] == 0
+	finally:
+		_stop_eventbus(bus)

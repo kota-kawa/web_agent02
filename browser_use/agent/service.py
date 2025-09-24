@@ -498,15 +498,18 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""Instantiate an :class:`EventBus` with a safe name.
 
 		``EventBus`` instances expect ``name`` to be both a Python
-		identifier and unique within the process. If name generation
-		unexpectedly produces an invalid value we retry once with a
-		random identifier and log the failure for debugging purposes.
-		As a final guard we sanitise the fallback name to ensure the
-		constructor always receives a valid identifier even if a custom
-		``_generate_eventbus_name`` implementation misbehaves.
+		identifier and unique within the process. Before instantiating
+		the bus we sanitise the generated name to coerce it into a valid
+		identifier. If name generation unexpectedly produces an invalid
+		value we retry once with a random identifier and log the failure
+		for debugging purposes. As a final guard we sanitise the fallback
+		name to ensure the constructor always receives a valid identifier
+		even if a custom ``_generate_eventbus_name`` implementation
+		misbehaves.
 		"""
 
-		preferred_name = self._generate_eventbus_name(force_random=force_random)
+		preferred_name_raw = self._generate_eventbus_name(force_random=force_random)
+		preferred_name = self._sanitize_eventbus_name(preferred_name_raw)
 
 		try:
 			return EventBus(name=preferred_name)
@@ -514,8 +517,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			fallback_candidate = self._generate_eventbus_name(force_random=True)
 			fallback_name = self._sanitize_eventbus_name(fallback_candidate)
 			logger.warning(
-				'Failed to create EventBus with name %s (%s). Using fallback name %s',
+				'Failed to create EventBus with name %s (raw=%s, %s). Using fallback name %s',
 				preferred_name,
+				preferred_name_raw,
 				exc,
 				fallback_name,
 			)
