@@ -120,3 +120,28 @@ def test_add_new_task_assigns_unique_eventbus_names() -> None:
 
     for bus in created_buses:
         _stop_eventbus(bus)
+
+
+def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
+    agent = _make_agent()
+
+    original_bus = agent.eventbus
+    original_name = original_bus.name
+
+    agent.running = True
+    agent.add_new_task("defer refresh")
+
+    assert agent._pending_eventbus_refresh is True
+    assert agent.eventbus is original_bus
+
+    agent.running = False
+    _stop_eventbus(original_bus)
+    agent._reset_eventbus()
+    refreshed_bus = agent.eventbus
+
+    assert refreshed_bus is not original_bus
+    assert refreshed_bus.name != original_name
+    assert refreshed_bus.name.isidentifier()
+    assert agent._pending_eventbus_refresh is False
+
+    _stop_eventbus(refreshed_bus)
