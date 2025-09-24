@@ -211,6 +211,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.task_id: str = self.id
 		self.session_id: str = uuid7str()
 		self.running: bool = False
+		self._pending_eventbus_refresh: bool = False
 		self.last_response_time: float = 0.0
 
 		browser_profile = browser_profile or DEFAULT_BROWSER_PROFILE
@@ -502,6 +503,16 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				fallback_name,
 			)
 			return EventBus(name=fallback_name)
+
+	def _reset_eventbus(self) -> None:
+		"""Replace the current :class:`EventBus` with a fresh instance."""
+
+		self.eventbus = self._create_eventbus(force_random=True)
+
+		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
+			self.eventbus.on('*', self.cloud_sync.handle_event)
+
+		self._pending_eventbus_refresh = False
 	@property
 	def logger(self) -> logging.Logger:
 		"""Get instance-specific logger with task ID in the name"""
@@ -667,18 +678,13 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Mark as follow-up task so we preserve state-specific behaviours like skipping initial actions
 		self.state.follow_up_task = True
 
-		# Only recreate the event bus when we're not actively running (the previous run shut it down)
-		if not self.running:
-			# Force a fresh identifier for follow-up runs so we never reuse the
-			# name from the previous execution. Some EventBus implementations
-			# keep strong references to prior instances, so generating a new
-			# random suffix avoids spurious "name must be unique" assertions
-			# when the agent is invoked multiple times.
-			self.eventbus = self._create_eventbus(force_random=True)
-
-			# Re-register cloud sync handler if it exists (if not disabled)
-			if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
-				self.eventbus.on('*', self.cloud_sync.handle_event)
+		# Ensure follow-up runs never reuse the previous EventBus identifier.
+		if self.running:
+			# Defer recreation until the active run finishes shutting down its EventBus.
+			self._pending_eventbus_refresh = True
+		else:
+			# Create the new EventBus immediately when the agent is idle.
+			self._reset_eventbus()
 
 
 	def _current_step_number(self) -> int:
@@ -1713,6 +1719,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Stop the event bus gracefully, waiting for all events to be processed
 			# Use longer timeout to avoid deadlocks in tests with multiple agents
 			await self.eventbus.stop(timeout=3.0)
+
+			if self._pending_eventbus_refresh:
+				self._reset_eventbus()
 
 			await self.close()
 
