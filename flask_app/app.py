@@ -8,6 +8,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -46,6 +47,8 @@ def _env_int(name: str, default: int) -> int:
 
 _AGENT_MAX_STEPS = _env_int('AGENT_MAX_STEPS', 30)
 _CDP_PROBE_TIMEOUT = float(os.environ.get('BROWSER_USE_CDP_TIMEOUT', '2.0'))
+_CDP_DETECTION_RETRIES = _env_int('BROWSER_USE_CDP_RETRIES', 5)
+_CDP_DETECTION_RETRY_DELAY = float(os.environ.get('BROWSER_USE_CDP_RETRY_DELAY', '1.5'))
 
 _CDP_SESSION_CLEANUP: Callable[[], None] | None = None
 
@@ -584,6 +587,22 @@ def _probe_cdp_via_webdriver(base_url: str) -> str | None:
     return None
 
 
+def _detect_cdp_from_candidates(candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        ws_url = _probe_cdp_candidate(candidate)
+        if ws_url:
+            logger.info('Detected Chrome DevTools endpoint at %s', candidate)
+            return ws_url
+
+    for candidate in candidates:
+        ws_url = _probe_cdp_via_webdriver(candidate)
+        if ws_url:
+            logger.info('Detected Chrome DevTools endpoint via WebDriver at %s', candidate)
+            return ws_url
+
+    return None
+
+
 def _resolve_cdp_url() -> str | None:
     explicit_keys = ('BROWSER_USE_CDP_URL', 'CDP_URL', 'REMOTE_CDP_URL')
     for key in explicit_keys:
@@ -609,17 +628,27 @@ def _resolve_cdp_url() -> str | None:
             'http://127.0.0.1:4444/wd/hub',
         ]
 
-    for candidate in candidates:
-        ws_url = _probe_cdp_candidate(candidate)
+    retries = max(1, _CDP_DETECTION_RETRIES)
+    delay = _CDP_DETECTION_RETRY_DELAY if _CDP_DETECTION_RETRY_DELAY > 0 else 0.0
+
+    for attempt in range(1, retries + 1):
+        ws_url = _detect_cdp_from_candidates(candidates)
         if ws_url:
-            logger.info('Detected Chrome DevTools endpoint at %s', candidate)
             return ws_url
 
-    for candidate in candidates:
-        ws_url = _probe_cdp_via_webdriver(candidate)
-        if ws_url:
-            logger.info('Detected Chrome DevTools endpoint via WebDriver at %s', candidate)
-            return ws_url
+        cleanup = _consume_cdp_session_cleanup()
+        if cleanup:
+            with suppress(Exception):
+                cleanup()
+
+        if attempt < retries:
+            logger.info(
+                'Chrome DevToolsのCDP URLの検出に失敗しました。リトライします (%s/%s)...',
+                attempt + 1,
+                retries,
+            )
+            if delay:
+                time.sleep(delay)
 
     logger.warning('Chrome DevToolsのCDP URLを自動検出できませんでした。環境変数BROWSER_USE_CDP_URLを設定してください。')
     return None
