@@ -124,6 +124,71 @@ def test_probe_cdp_via_webdriver_parses_response(monkeypatch: pytest.MonkeyPatch
     assert len(calls) == 2
 
 
+def test_resolve_cdp_url_retries_until_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('BROWSER_USE_CDP_URL', raising=False)
+    monkeypatch.setattr(flask_app_module, '_CDP_DETECTION_RETRIES', 3)
+    monkeypatch.setattr(flask_app_module, '_CDP_DETECTION_RETRY_DELAY', 0.0)
+    monkeypatch.setenv('BROWSER_USE_CDP_CANDIDATES', 'http://browser:4444')
+
+    monkeypatch.setattr(flask_app_module, '_probe_cdp_candidate', lambda candidate: None)
+
+    attempts = {'count': 0}
+
+    def fake_webdriver_probe(candidate: str) -> str | None:
+        attempts['count'] += 1
+        if attempts['count'] < 2:
+            return None
+        flask_app_module._replace_cdp_session_cleanup(lambda: None)
+        return 'ws://retry-success'
+
+    monkeypatch.setattr(flask_app_module, '_probe_cdp_via_webdriver', fake_webdriver_probe)
+    monkeypatch.setattr(flask_app_module.time, 'sleep', lambda *_: None)
+
+    result = flask_app_module._resolve_cdp_url()
+
+    assert result == 'ws://retry-success'
+    assert attempts['count'] == 2
+
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    assert callable(cleanup)
+    cleanup()
+
+
+def test_resolve_cdp_url_returns_none_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('BROWSER_USE_CDP_URL', raising=False)
+    monkeypatch.setattr(flask_app_module, '_CDP_DETECTION_RETRIES', 3)
+    monkeypatch.setattr(flask_app_module, '_CDP_DETECTION_RETRY_DELAY', 1.0)
+    monkeypatch.setenv('BROWSER_USE_CDP_CANDIDATES', 'http://browser:4444')
+
+    monkeypatch.setattr(flask_app_module, '_probe_cdp_candidate', lambda candidate: None)
+
+    attempts = 0
+
+    def fake_webdriver_probe(candidate: str) -> str | None:
+        nonlocal attempts
+        attempts += 1
+        return None
+
+    monkeypatch.setattr(flask_app_module, '_probe_cdp_via_webdriver', fake_webdriver_probe)
+
+    sleep_calls: list[float] = []
+
+    def record_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(flask_app_module.time, 'sleep', record_sleep)
+
+    result = flask_app_module._resolve_cdp_url()
+
+    assert result is None
+    assert attempts == 3
+    assert len(sleep_calls) == 2
+    assert all(delay == 1.0 for delay in sleep_calls)
+
+    cleanup = flask_app_module._consume_cdp_session_cleanup()
+    assert cleanup is None
+
+
 def test_browser_agent_controller_preserves_agent_across_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('BROWSER_USE_CDP_URL', 'ws://dummy-cdp')
 
