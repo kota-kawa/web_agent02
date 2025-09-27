@@ -50,3 +50,10 @@ def test_sanitize_handles_problematic_input():
     assert sanitized.startswith('Agent_')
     assert sanitized.isidentifier()
     assert '-' not in sanitized
+
+
+def test_sanitize_normalizes_unicode_variants():
+    sanitized = EventBusFactory.sanitize('Agent_７８ｄＦ–8000–test')
+
+    assert sanitized == 'Agent_78dF_8000_test'
+    assert sanitized.isidentifier()
