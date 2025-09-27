@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import sys
@@ -446,5 +447,177 @@ def test_follow_up_recreated_session_reloads_resume(monkeypatch: pytest.MonkeyPa
         prepared = first_agent.initial_actions[0].get('go_to_url', {})
         assert prepared.get('url') == 'https://example.com/1'
         assert prepared.get('new_tab') is False
+    finally:
+        controller.shutdown()
+
+
+def test_keep_alive_sessions_drain_event_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('BROWSER_USE_CDP_URL', 'ws://dummy-cdp')
+
+    class FakeHistoryList:
+        def __init__(self) -> None:
+            self.history: list[Any] = []
+            self._final_result = ''
+            self._success = True
+
+        def is_successful(self) -> bool:
+            return self._success
+
+        def final_result(self) -> str:
+            return self._final_result
+
+    class FakeEventBus:
+        def __init__(self) -> None:
+            self.pending = 0
+            self.force_timeout = False
+            self.cleanup_calls: list[float] = []
+            self.stop_calls = 0
+
+        async def wait_until_idle(self, timeout: float) -> None:
+            if self.force_timeout:
+                raise asyncio.TimeoutError
+            self.pending = 0
+
+        def cleanup_event_history(self) -> None:  # noqa: D401
+            self.cleanup_calls.append(0.0)
+
+        async def stop(self, *, clear: bool, timeout: float) -> None:  # noqa: D401
+            self.stop_calls += 1
+            self.pending = 0
+
+    class FakeBrowserProfile:
+        def __init__(
+            self,
+            *,
+            cdp_url: str | None,
+            keep_alive: bool,
+            highlight_elements: bool,
+            wait_between_actions: float,
+        ) -> None:
+            self.cdp_url = cdp_url
+            self.keep_alive = keep_alive
+            self.highlight_elements = highlight_elements
+            self.wait_between_actions = wait_between_actions
+
+    class FakeBrowserSession:
+        def __init__(self, browser_profile: FakeBrowserProfile) -> None:
+            self.browser_profile = browser_profile
+            self.start_calls = 0
+            self.stop_calls = 0
+            self.event_bus = FakeEventBus()
+            self.drain_timeouts: list[float] = []
+
+        async def start(self) -> None:
+            self.start_calls += 1
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+
+        async def drain_event_bus(self, *, timeout: float = 5.0) -> bool:
+            self.drain_timeouts.append(timeout)
+            try:
+                await self.event_bus.wait_until_idle(timeout)
+            except asyncio.TimeoutError:
+                await self.event_bus.stop(clear=True, timeout=timeout)
+                self.event_bus = FakeEventBus()
+                return False
+            self.event_bus.cleanup_event_history()
+            return True
+
+    class FakeAgent:
+        def __init__(
+            self,
+            *,
+            task: str,
+            browser_session: FakeBrowserSession,
+            llm: Any,
+            register_new_step_callback: Any,
+            extend_system_message: Any,
+        ) -> None:
+            self.task = task
+            self.browser_session = browser_session
+            self.register_new_step_callback = register_new_step_callback
+            self.extend_system_message = extend_system_message
+            self.initial_actions: list[dict[str, Any]] | None = None
+            self.initial_url: str | None = None
+            self.history = FakeHistoryList()
+            self.state = SimpleNamespace(
+                follow_up_task=False,
+                n_steps=0,
+                last_result=[SimpleNamespace(is_done=True, success=True)],
+            )
+            self.running = False
+            self.tasks_received = [task]
+
+        def _convert_initial_actions(self, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            self.initial_actions = actions
+            return actions
+
+        def add_new_task(self, new_task: str) -> None:
+            self.tasks_received.append(new_task)
+            self.task = new_task
+            self.state.follow_up_task = True
+
+        async def run(self, max_steps: int) -> FakeHistoryList:  # noqa: ARG002
+            bus = self.browser_session.event_bus
+            if bus.pending >= 1:
+                raise RuntimeError('EventBus at capacity: pending events remain')
+            bus.pending += 1
+            self.running = True
+            step_number = len(self.history.history) + 1
+            state = SimpleNamespace(title=f'Step {step_number}', url=f'https://example.com/{step_number}')
+            model_output = SimpleNamespace(
+                action=[],
+                evaluation_previous_goal=None,
+                next_goal=None,
+                memory=None,
+                long_term_memory=None,
+            )
+            result = [
+                SimpleNamespace(
+                    error=None,
+                    is_done=True,
+                    success=True,
+                    extracted_content=f'result {step_number}',
+                    long_term_memory=None,
+                    metadata=None,
+                )
+            ]
+            step = SimpleNamespace(state=state, model_output=model_output, result=result)
+            self.history.history.append(step)
+            self.history._final_result = f'Final {step_number}'
+            self.history._success = True
+            self.state.n_steps += 1
+            if self.register_new_step_callback:
+                self.register_new_step_callback(state, model_output, step_number)
+            self.running = False
+            return self.history
+
+    monkeypatch.setattr(flask_app_module, '_create_gemini_llm', lambda: object())
+    monkeypatch.setattr(flask_app_module, 'BrowserProfile', FakeBrowserProfile)
+    monkeypatch.setattr(flask_app_module, 'BrowserSession', FakeBrowserSession)
+    monkeypatch.setattr(flask_app_module, 'Agent', FakeAgent)
+
+    controller = flask_app_module.BrowserAgentController(cdp_url='ws://dummy-cdp', max_steps=5)
+    try:
+        first_result = controller.run('最初の指示')
+        session = controller._browser_session  # type: ignore[attr-defined]
+        assert session is not None
+        first_bus = session.event_bus
+        assert len(first_result.history.history) == 1
+        assert first_bus.pending == 0
+        assert first_bus.cleanup_calls
+
+        first_bus.force_timeout = True
+
+        second_result = controller.run('続きの指示')
+        second_bus = controller._browser_session.event_bus  # type: ignore[attr-defined]
+        assert len(second_result.history.history) == 2
+        assert second_bus is not first_bus
+        assert first_bus.stop_calls == 1
+
+        third_result = controller.run('さらに続きの指示')
+        assert len(third_result.history.history) == 3
+        assert controller._browser_session.event_bus is second_bus  # type: ignore[attr-defined]
     finally:
         controller.shutdown()
