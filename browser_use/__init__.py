@@ -2,6 +2,7 @@ import os
 from typing import TYPE_CHECKING
 
 from browser_use.logging_config import setup_logging
+from browser_use.eventbus_patch import ensure_eventbus_name_sanitizer
 
 # Only set up logging if not in MCP mode or if explicitly requested
 if os.environ.get('BROWSER_USE_SETUP_LOGGING', 'true').lower() != 'false':
@@ -41,6 +42,9 @@ def _patched_del(self):
 
 
 base_subprocess.BaseSubprocessTransport.__del__ = _patched_del
+
+# Ensure EventBus identifiers stay compatible with stricter bubus releases.
+ensure_eventbus_name_sanitizer()
 
 
 # Type stubs for lazy imports - fixes linter warnings
