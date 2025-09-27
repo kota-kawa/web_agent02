@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from contextlib import suppress
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, Self, cast
@@ -414,6 +415,50 @@ class BrowserSession(BaseModel):
 		if hasattr(self, '_watchdogs_attached'):
 			self._watchdogs_attached = False
 
+	def _reset_event_bus_state(self) -> None:
+		"""Reset watchdog references and re-register core event handlers."""
+
+		self._crash_watchdog = None
+		self._downloads_watchdog = None
+		self._aboutblank_watchdog = None
+		self._security_watchdog = None
+		self._storage_state_watchdog = None
+		self._local_browser_watchdog = None
+		self._default_action_watchdog = None
+		self._dom_watchdog = None
+		self._screenshot_watchdog = None
+		self._permissions_watchdog = None
+		self._recording_watchdog = None
+
+		if hasattr(self, '_watchdogs_attached'):
+			self._watchdogs_attached = False
+
+		self.event_bus = EventBus()
+		self.model_post_init(None)
+
+	async def drain_event_bus(self, *, timeout: float = 5.0) -> bool:
+		"""Wait for the event bus to become idle and clean up history.
+
+		Returns True when the bus drains successfully, False when a timeout
+		forces a rotation to a fresh bus. Always keeps the CDP connection
+		alive so follow-up runs maintain context.
+		"""
+
+		try:
+			await self.event_bus.wait_until_idle(timeout=timeout)
+		except (asyncio.TimeoutError, TimeoutError):
+			self.logger.warning(
+				'Event bus failed to drain after %.1fs; rotating for a clean follow-up.',
+				timeout,
+			)
+			with suppress(Exception):
+				await self.event_bus.stop(clear=True, timeout=timeout)
+			self._reset_event_bus_state()
+			return False
+
+		with suppress(Exception):
+			self.event_bus.cleanup_event_history()
+		return True
 	def model_post_init(self, __context) -> None:
 		"""Register event handlers after model initialization."""
 		# Check if handlers are already registered to prevent duplicates
