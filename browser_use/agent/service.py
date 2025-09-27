@@ -27,6 +27,7 @@ from browser_use.llm.base import BaseChatModel
 from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
 from browser_use.llm.google.chat import ChatGoogle
 from browser_use.tokens.service import TokenCost
+from bubus import EventBus
 
 load_dotenv()
 
@@ -127,9 +128,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 	@time_execution_sync('--init')
 	def __init__(
-                self,
-                task: str,
-                llm: BaseChatModel | None = None,
+		self,
+		task: str,
+		llm: BaseChatModel | None = None,
 		# Optional parameters
 		browser_profile: BrowserProfile | None = None,
 		browser_session: BrowserSession | None = None,
@@ -422,10 +423,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Event bus with WAL persistence
 		# Default to ~/.config/browseruse/events/{agent_session_id}.jsonl
 		# wal_path = CONFIG.BROWSER_USE_CONFIG_DIR / 'events' / f'{self.session_id}.jsonl'
-		self.eventbus, self._reserved_eventbus_name = EventBusFactory.create(
-			agent_id=self.id,
-			logger=logger,
-		)
+		self.eventbus, self._reserved_eventbus_name = self._create_eventbus()
 
 		# Cloud sync service
 		self.enable_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
@@ -451,15 +449,40 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
 
+	def _create_eventbus(self, *, force_random: bool = False) -> tuple[EventBus, str | None]:
+		"""Create a new :class:`EventBus` instance with graceful fallback."""
+
+		try:
+			bus, reserved_name = EventBusFactory.create(
+				agent_id=self.id,
+				force_random=force_random,
+				logger=logger,
+			)
+			return bus, reserved_name
+		except AssertionError as exc:
+			logger.warning(
+				'Failed to create named EventBus for agent %s (force_random=%s): %s. '
+				'Falling back to anonymous EventBus.',
+				self.id,
+				force_random,
+				exc,
+			)
+		except Exception as exc:  # pragma: no cover - defensive logging
+			logger.exception(
+				'Unexpected error while creating EventBus for agent %s (force_random=%s); '
+				'falling back to anonymous EventBus.',
+				self.id,
+				force_random,
+			)
+
+		fallback_bus = EventBus()
+		return fallback_bus, None
+
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
 
 		EventBusFactory.release(self._reserved_eventbus_name)
-		self.eventbus, self._reserved_eventbus_name = EventBusFactory.create(
-			agent_id=self.id,
-			force_random=True,
-			logger=logger,
-		)
+		self.eventbus, self._reserved_eventbus_name = self._create_eventbus(force_random=True)
 
 		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
 			self.eventbus.on('*', self.cloud_sync.handle_event)
