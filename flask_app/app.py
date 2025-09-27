@@ -761,25 +761,18 @@ class BrowserAgentController:
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to broadcast step update', exc_info=True)
 
-        with self._state_lock:
-            existing_agent = self._agent
-            agent_running = self._is_running
-
-        if agent_running:
-            raise AgentControllerError('エージェントは実行中です。')
-
-        if existing_agent is None:
-            agent = Agent(
-                task=task,
+        def _create_new_agent(initial_task: str) -> Agent:
+            fresh_agent = Agent(
+                task=initial_task,
                 browser_session=session,
                 llm=self._llm,
                 register_new_step_callback=handle_new_step,
                 extend_system_message=_LANGUAGE_EXTENSION,
             )
-            if _DEFAULT_START_URL and not agent.initial_actions:
+            if _DEFAULT_START_URL and not fresh_agent.initial_actions:
                 try:
-                    agent.initial_url = _DEFAULT_START_URL
-                    agent.initial_actions = agent._convert_initial_actions(
+                    fresh_agent.initial_url = _DEFAULT_START_URL
+                    fresh_agent.initial_actions = fresh_agent._convert_initial_actions(
                         [{'go_to_url': {'url': _DEFAULT_START_URL, 'new_tab': False}}]
                     )
                 except Exception:  # noqa: BLE001
@@ -788,6 +781,17 @@ class BrowserAgentController:
                         _DEFAULT_START_URL,
                         exc_info=True,
                     )
+            return fresh_agent
+
+        with self._state_lock:
+            existing_agent = self._agent
+            agent_running = self._is_running
+
+        if agent_running:
+            raise AgentControllerError('エージェントは実行中です。')
+
+        if existing_agent is None:
+            agent = _create_new_agent(task)
             with self._state_lock:
                 self._agent = agent
         else:
@@ -797,6 +801,15 @@ class BrowserAgentController:
             try:
                 agent.add_new_task(task)
                 self._prepare_agent_for_follow_up(agent, force_resume_navigation=session_recreated)
+            except (AssertionError, ValueError) as exc:
+                self._logger.exception('Failed to apply follow-up task %r; recreating agent.', task)
+                with self._state_lock:
+                    self._agent = None
+                    self._current_agent = None
+                agent = _create_new_agent(task)
+                with self._state_lock:
+                    self._agent = agent
+                self._logger.info('Recreated agent after failure and retrying task %r.', task)
             except Exception as exc:  # noqa: BLE001
                 raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
 

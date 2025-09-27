@@ -461,20 +461,24 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		the owner of the bus.
 		"""
 
-		sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in name)
-		sanitized = re.sub(r'_+', '_', sanitized).strip('_')
+		candidate = name
 
-		if not sanitized:
-			sanitized = uuid7str().replace('-', '')
+		while True:
+			sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in candidate)
+			sanitized = re.sub(r'_+', '_', sanitized).strip('_')
 
-		if not sanitized.startswith('Agent_'):
-			sanitized = f'Agent_{sanitized}'
+			if not sanitized:
+				candidate = f'Agent_{uuid7str()}'
+				continue
 
-		if sanitized in {'Agent_', 'Agent'} or not sanitized.isidentifier():
-			random_suffix = uuid7str().replace('-', '')
-			sanitized = f'Agent_{random_suffix}'
+			if not sanitized.startswith('Agent_'):
+				sanitized = f'Agent_{sanitized}'
 
-		return sanitized
+			if sanitized in {'Agent_', 'Agent'} or not sanitized.isidentifier():
+				candidate = f'Agent_{uuid7str()}'
+				continue
+
+			return sanitized
 
 
 	def _ensure_unique_eventbus_name(self, name: str) -> str:
