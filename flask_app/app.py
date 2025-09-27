@@ -843,14 +843,30 @@ class BrowserAgentController:
             keep_alive = session.browser_profile.keep_alive
             if keep_alive:
                 drained_cleanly = True
-                try:
-                    drained_cleanly = await session.drain_event_bus()
-                except Exception:  # noqa: BLE001
-                    drained_cleanly = False
-                    self._logger.warning('Failed to drain browser event bus; rotating for safety.', exc_info=True)
+                drain_method = getattr(type(session), 'drain_event_bus', None)
+                if callable(drain_method):
+                    try:
+                        drained_cleanly = await drain_method(session)
+                    except Exception:  # noqa: BLE001
+                        drained_cleanly = False
+                        self._logger.warning(
+                            'Failed to drain browser event bus; rotating for safety.',
+                            exc_info=True,
+                        )
+                    else:
+                        if not drained_cleanly:
+                            self._logger.warning('Browser event bus rotated after drain timeout; pending events cleared.')
                 else:
-                    if not drained_cleanly:
-                        self._logger.warning('Browser event bus rotated after drain timeout; pending events cleared.')
+                    drained_cleanly = False
+                    self._logger.debug(
+                        'Browser session implementation does not expose drain_event_bus(); applying compatibility cleanup.',
+                    )
+                    with suppress(Exception):
+                        await session.event_bus.stop(clear=True, timeout=1.0)
+                    reset_method = getattr(session, '_reset_event_bus_state', None)
+                    if callable(reset_method):
+                        with suppress(Exception):
+                            reset_method()
             else:
                 with suppress(Exception):
                     await session.stop()
