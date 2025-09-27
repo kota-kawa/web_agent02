@@ -21,6 +21,7 @@ from browser_use.agent.cloud_events import (
 	CreateAgentTaskEvent,
 	UpdateAgentTaskEvent,
 )
+from browser_use.agent.eventbus import EventBusFactory
 from browser_use.agent.message_manager.utils import save_conversation
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
@@ -29,7 +30,6 @@ from browser_use.tokens.service import TokenCost
 
 load_dotenv()
 
-from bubus import EventBus
 from pydantic import BaseModel, ValidationError
 from uuid_extensions import uuid7str
 
@@ -124,7 +124,6 @@ AgentHookFunc = Callable[['Agent'], Awaitable[None]]
 
 
 class Agent(Generic[Context, AgentStructuredOutput]):
-	_ACTIVE_EVENTBUS_NAMES: ClassVar[set[str]] = set()
 
 	@time_execution_sync('--init')
 	def __init__(
@@ -423,7 +422,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Event bus with WAL persistence
 		# Default to ~/.config/browseruse/events/{agent_session_id}.jsonl
 		# wal_path = CONFIG.BROWSER_USE_CONFIG_DIR / 'events' / f'{self.session_id}.jsonl'
-		self.eventbus = self._create_eventbus()
+		self.eventbus, self._reserved_eventbus_name = EventBusFactory.create(
+			agent_id=self.id,
+			logger=logger,
+		)
 
 		# Cloud sync service
 		self.enable_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
@@ -449,185 +451,15 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
 
-	def _sanitize_eventbus_name(self, name: str) -> str:
-		"""Normalize *name* so it always satisfies ``str.isidentifier``.
-
-		The sanitizer keeps alphanumeric characters and underscores,
-		replacing any other character with ``_``. If the resulting
-		string loses all entropy (e.g. becomes just ``"Agent_"``) or is
-		still not a valid identifier, it falls back to a fresh random
-		UUID-based suffix. The returned value always begins with the
-		``Agent_`` prefix so different components can easily recognise
-		the owner of the bus.
-		"""
-
-		candidate = name
-
-		while True:
-			sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in candidate)
-			sanitized = re.sub(r'_+', '_', sanitized).strip('_')
-
-			if not sanitized:
-				candidate = f'Agent_{uuid7str()}'
-				continue
-
-			if not sanitized.startswith('Agent_'):
-				sanitized = f'Agent_{sanitized}'
-
-			if sanitized in {'Agent_', 'Agent'} or not sanitized.isidentifier():
-				candidate = f'Agent_{uuid7str()}'
-				continue
-
-			return sanitized
-
-
-	def _ensure_unique_eventbus_name(self, name: str) -> str:
-		"""Ensure *name* is not already reserved by another agent."""
-
-		if name not in self._ACTIVE_EVENTBUS_NAMES:
-			return name
-
-		for _ in range(5):
-			random_suffix = uuid7str().replace('-', '')[:6]
-			candidate = self._sanitize_eventbus_name(f'{name}_{random_suffix}')
-			if candidate not in self._ACTIVE_EVENTBUS_NAMES:
-				return candidate
-
-		return self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
-
-	def _release_eventbus_name(self) -> None:
-		"""Release the currently reserved EventBus name, if any."""
-
-		current = getattr(self, '_reserved_eventbus_name', None)
-		if current:
-			self._ACTIVE_EVENTBUS_NAMES.discard(current)
-			self._reserved_eventbus_name = None
-
-	def _generate_eventbus_name(self, *, force_random: bool = False) -> str:
-		"""Create a valid EventBus name.
-
-		When ``force_random`` is False we try to derive a deterministic
-		suffix from ``self.id`` so the name is stable across runs. If
-		the derived value is empty we fall back to a random UUID-based
-		suffix. When ``force_random`` is True we skip the deterministic
-		branch entirely and always return a fresh random identifier.
-		The sanitizer ensures the final name is a valid Python
-		identifier.
-		"""
-
-		suffix: str = ''
-
-		if not force_random:
-			# Keep only alphanumeric characters so the identifier check passes
-			suffix_source = ''.join(ch for ch in str(self.id) if ch.isalnum())
-			suffix = suffix_source[-8:] if suffix_source else ''
-
-		if not suffix:
-			suffix = uuid7str().replace('-', '')[-8:]
-
-		name = f'Agent_{suffix}'
-		return self._sanitize_eventbus_name(name)
-
-	def _create_eventbus(self, *, force_random: bool = False) -> EventBus:
-		"""Instantiate an :class:`EventBus` with a safe name.
-
-		``EventBus`` instances expect ``name`` to be both a Python
-		identifier and unique within the process. Before instantiating
-		the bus we sanitise the generated name to coerce it into a valid
-		identifier. If name generation unexpectedly produces an invalid
-		value we retry once with a random identifier and log the failure
-		for debugging purposes. As a final guard we sanitise the fallback
-		name to ensure the constructor always receives a valid identifier
-		even if a custom ``_generate_eventbus_name`` implementation
-		misbehaves.
-		"""
-
-		self._release_eventbus_name()
-
-		attempts: list[tuple[str, str]] = []
-
-		preferred_name_raw = self._generate_eventbus_name(force_random=force_random)
-		attempts.append(("preferred", preferred_name_raw))
-
-		created_name = ""
-		bus: EventBus | None = None
-		last_error: Exception | None = None
-
-		idx = 0
-		while idx < len(attempts):
-			label, raw_name = attempts[idx]
-			idx += 1
-
-			sanitized = self._sanitize_eventbus_name(raw_name)
-			unique_candidate = self._ensure_unique_eventbus_name(sanitized)
-			final_candidate = self._sanitize_eventbus_name(unique_candidate)
-
-			try:
-				if not final_candidate.isidentifier():
-					raise ValueError(
-						f'Invalid EventBus identifier produced after sanitization: {final_candidate!r}'
-					)
-
-				bus = EventBus(name=final_candidate)
-				created_name = final_candidate
-				break
-			except Exception as exc:  # noqa: BLE001
-				last_error = exc
-
-				log_message = (
-					'Failed to create EventBus with %s name %s (raw=%s, %s)'
-				)
-				if label == "preferred":
-					logger.warning(
-						log_message + '. Trying fallback name.',
-						label,
-						final_candidate,
-						raw_name,
-						exc,
-						exc_info=isinstance(exc, AssertionError),
-					)
-					fallback_candidate = self._generate_eventbus_name(force_random=True)
-					attempts.append(("fallback", fallback_candidate))
-				elif label == "fallback":
-					logger.error(
-						log_message + '. Using emergency name.',
-						label,
-						final_candidate,
-						raw_name,
-						exc,
-						exc_info=True,
-					)
-					emergency_candidate = f'Agent_{uuid7str()}'
-					attempts.append(("emergency", emergency_candidate))
-				else:
-					logger.error(
-						log_message + '. No more candidates available.',
-						label,
-						final_candidate,
-						raw_name,
-						exc,
-						exc_info=True,
-					)
-
-		if bus is None:
-			if last_error is not None:
-				logger.error(
-					'Creating named EventBus failed (%s). Falling back to anonymous EventBus().',
-					last_error,
-					exc_info=True,
-				)
-			bus = EventBus()
-			created_name = bus.name
-
-		self._ACTIVE_EVENTBUS_NAMES.add(created_name)
-		self._reserved_eventbus_name = created_name
-
-		return bus
-
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
 
-		self.eventbus = self._create_eventbus(force_random=True)
+		EventBusFactory.release(self._reserved_eventbus_name)
+		self.eventbus, self._reserved_eventbus_name = EventBusFactory.create(
+			agent_id=self.id,
+			force_random=True,
+			logger=logger,
+		)
 
 		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
 			self.eventbus.on('*', self.cloud_sync.handle_event)
@@ -1849,7 +1681,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Stop the event bus gracefully, waiting for all events to be processed
 			# Use longer timeout to avoid deadlocks in tests with multiple agents
 			await self.eventbus.stop(timeout=3.0)
-			self._release_eventbus_name()
+			EventBusFactory.release(self._reserved_eventbus_name)
+			self._reserved_eventbus_name = None
 			
 			if self._pending_eventbus_refresh:
 				self._reset_eventbus()
