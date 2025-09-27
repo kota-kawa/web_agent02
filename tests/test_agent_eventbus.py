@@ -212,6 +212,27 @@ def test_create_eventbus_sanitizes_invalid_names() -> None:
                 _stop_eventbus(bus)
 
 
+def test_create_eventbus_recovers_when_all_candidates_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+        agent = _make_agent()
+
+        def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
+                return "Agent_invalid-name"
+
+        def passthrough(self, name: str) -> str:  # noqa: D401
+                return name
+
+        agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
+        agent._sanitize_eventbus_name = types.MethodType(passthrough, agent)  # type: ignore[attr-defined]
+
+        bus = agent._create_eventbus()
+
+        try:
+                assert isinstance(bus, EventBus)
+                assert bus.name.startswith("EventBus_")
+        finally:
+                _stop_eventbus(bus)
+
+
 def test_add_new_task_recovers_from_invalid_sanitizer(monkeypatch) -> None:
         call_count = {"sanitize": 0}
 

@@ -462,6 +462,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""
 
 		sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in name)
+		sanitized = re.sub(r'_+', '_', sanitized).strip('_')
+
+		if not sanitized:
+			sanitized = uuid7str().replace('-', '')
 
 		if not sanitized.startswith('Agent_'):
 			sanitized = f'Agent_{sanitized}'
@@ -471,6 +475,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			sanitized = f'Agent_{random_suffix}'
 
 		return sanitized
+
 
 	def _ensure_unique_eventbus_name(self, name: str) -> str:
 		"""Ensure *name* is not already reserved by another agent."""
@@ -562,28 +567,50 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				bus = EventBus(name=final_candidate)
 				created_name = final_candidate
 				break
-			except (AssertionError, ValueError) as exc:
+			except Exception as exc:  # noqa: BLE001
 				last_error = exc
 
 				log_message = (
 					'Failed to create EventBus with %s name %s (raw=%s, %s)'
 				)
 				if label == "preferred":
-					logger.warning(log_message + '. Trying fallback name.', label, final_candidate, raw_name, exc)
+					logger.warning(
+						log_message + '. Trying fallback name.',
+						label,
+						final_candidate,
+						raw_name,
+						exc,
+						exc_info=isinstance(exc, AssertionError),
+					)
 					fallback_candidate = self._generate_eventbus_name(force_random=True)
 					attempts.append(("fallback", fallback_candidate))
 				elif label == "fallback":
-					logger.error(log_message + '. Using emergency name.', label, final_candidate, raw_name, exc)
+					logger.error(
+						log_message + '. Using emergency name.',
+						label,
+						final_candidate,
+						raw_name,
+						exc,
+						exc_info=True,
+					)
 					emergency_candidate = f'Agent_{uuid7str()}'
 					attempts.append(("emergency", emergency_candidate))
 				else:
-					logger.error(log_message + '. No more candidates available.', label, final_candidate, raw_name, exc)
+					logger.error(
+						log_message + '. No more candidates available.',
+						label,
+						final_candidate,
+						raw_name,
+						exc,
+						exc_info=True,
+					)
 
 		if bus is None:
 			if last_error is not None:
 				logger.error(
 					'Creating named EventBus failed (%s). Falling back to anonymous EventBus().',
 					last_error,
+					exc_info=True,
 				)
 			bus = EventBus()
 			created_name = bus.name
