@@ -9,7 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -124,11 +124,13 @@ AgentHookFunc = Callable[['Agent'], Awaitable[None]]
 
 
 class Agent(Generic[Context, AgentStructuredOutput]):
+	_ACTIVE_EVENTBUS_NAMES: ClassVar[set[str]] = set()
+
 	@time_execution_sync('--init')
 	def __init__(
-		self,
-		task: str,
-		llm: BaseChatModel | None = None,
+                self,
+                task: str,
+                llm: BaseChatModel | None = None,
 		# Optional parameters
 		browser_profile: BrowserProfile | None = None,
 		browser_session: BrowserSession | None = None,
@@ -213,6 +215,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.running: bool = False
 		self._pending_eventbus_refresh: bool = False
 		self.last_response_time: float = 0.0
+		self._reserved_eventbus_name: str | None = None
 
 		browser_profile = browser_profile or DEFAULT_BROWSER_PROFILE
 
@@ -469,6 +472,28 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		return sanitized
 
+	def _ensure_unique_eventbus_name(self, name: str) -> str:
+		"""Ensure *name* is not already reserved by another agent."""
+
+		if name not in self._ACTIVE_EVENTBUS_NAMES:
+			return name
+
+		for _ in range(5):
+			random_suffix = uuid7str().replace('-', '')[:6]
+			candidate = self._sanitize_eventbus_name(f'{name}_{random_suffix}')
+			if candidate not in self._ACTIVE_EVENTBUS_NAMES:
+				return candidate
+
+		return self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
+
+	def _release_eventbus_name(self) -> None:
+		"""Release the currently reserved EventBus name, if any."""
+
+		current = getattr(self, '_reserved_eventbus_name', None)
+		if current:
+			self._ACTIVE_EVENTBUS_NAMES.discard(current)
+			self._reserved_eventbus_name = None
+
 	def _generate_eventbus_name(self, *, force_random: bool = False) -> str:
 		"""Create a valid EventBus name.
 
@@ -508,14 +533,22 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		misbehaves.
 		"""
 
+		self._release_eventbus_name()
+
 		preferred_name_raw = self._generate_eventbus_name(force_random=force_random)
-		preferred_name = self._sanitize_eventbus_name(preferred_name_raw)
+		preferred_name = self._ensure_unique_eventbus_name(
+			self._sanitize_eventbus_name(preferred_name_raw)
+		)
+
+		created_name = preferred_name
 
 		try:
-			return EventBus(name=preferred_name)
+			bus = EventBus(name=preferred_name)
 		except (ValueError, AssertionError) as exc:
 			fallback_candidate = self._generate_eventbus_name(force_random=True)
-			fallback_name = self._sanitize_eventbus_name(fallback_candidate)
+			fallback_name = self._ensure_unique_eventbus_name(
+				self._sanitize_eventbus_name(fallback_candidate)
+			)
 			logger.warning(
 				'Failed to create EventBus with name %s (raw=%s, %s). Using fallback name %s',
 				preferred_name,
@@ -523,17 +556,26 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				exc,
 				fallback_name,
 			)
+			created_name = fallback_name
 			try:
-				return EventBus(name=fallback_name)
+				bus = EventBus(name=fallback_name)
 			except (ValueError, AssertionError) as fallback_exc:
-				emergency_name = self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
+				emergency_name = self._ensure_unique_eventbus_name(
+					self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
+				)
 				logger.error(
 					'Fallback EventBus creation failed with name %s (%s). Using emergency name %s',
 					fallback_name,
 					fallback_exc,
 					emergency_name,
 				)
-				return EventBus(name=emergency_name)
+				created_name = emergency_name
+				bus = EventBus(name=emergency_name)
+
+		self._ACTIVE_EVENTBUS_NAMES.add(created_name)
+		self._reserved_eventbus_name = created_name
+
+		return bus
 
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
@@ -1464,7 +1506,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""Take a step
 
 		Returns:
-		        Tuple[bool, bool]: (is_done, is_valid)
+			Tuple[bool, bool]: (is_done, is_valid)
 		"""
 		if step_info is not None and step_info.step_number == 0:
 			# First step
@@ -1750,7 +1792,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Stop the event bus gracefully, waiting for all events to be processed
 			# Use longer timeout to avoid deadlocks in tests with multiple agents
 			await self.eventbus.stop(timeout=3.0)
-
+			self._release_eventbus_name()
+			
 			if self._pending_eventbus_refresh:
 				self._reset_eventbus()
 
@@ -1923,13 +1966,13 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		Rerun a saved history of actions with error handling and retry logic.
 
 		Args:
-		                history: The history to replay
-		                max_retries: Maximum number of retries per action
-		                skip_failures: Whether to skip failed actions or stop execution
-		                delay_between_actions: Delay between actions in seconds
+				history: The history to replay
+				max_retries: Maximum number of retries per action
+				skip_failures: Whether to skip failed actions or stop execution
+				delay_between_actions: Delay between actions in seconds
 
 		Returns:
-		                List of action results
+				List of action results
 		"""
 		# Skip cloud sync session events for rerunning (we're replaying, not starting new)
 		self.state.session_initialized = True
@@ -2086,8 +2129,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		Load history from file and rerun it.
 
 		Args:
-		                history_file: Path to the history file
-		                **kwargs: Additional arguments passed to rerun_history
+				history_file: Path to the history file
+				**kwargs: Additional arguments passed to rerun_history
 		"""
 		if not history_file:
 			history_file = 'AgentHistory.json'

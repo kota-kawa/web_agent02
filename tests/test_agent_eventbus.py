@@ -94,10 +94,10 @@ class DummyLLM:
         return _Result()
 
 
-def _make_agent() -> Agent:
+def _make_agent(**kwargs: Any) -> Agent:
     profile = BrowserProfile(cdp_url="http://example.com")
     session = BrowserSession(browser_profile=profile)
-    return Agent(task="initial", llm=DummyLLM(), browser_session=session)
+    return Agent(task="initial", llm=DummyLLM(), browser_session=session, **kwargs)
 
 
 def _stop_eventbus(bus) -> None:
@@ -134,21 +134,34 @@ def test_add_new_task_assigns_unique_eventbus_names() -> None:
 
 
 def test_add_new_task_with_hyphenated_task_id() -> None:
-	agent = _make_agent()
+    agent = _make_agent()
 
-	original_bus = agent.eventbus
-	followup_bus = original_bus
-	try:
-		agent.id = "Agent_8ea-7274-8000-3eb4154ed3e4"
-		agent.task_id = agent.id
-		agent.add_new_task("follow-up hyphen id")
-		followup_bus = agent.eventbus
-		assert followup_bus is not original_bus
-		assert followup_bus.name.isidentifier()
-		assert "-" not in followup_bus.name
-	finally:
-		for bus in {original_bus, followup_bus}:
-			_stop_eventbus(bus)
+    original_bus = agent.eventbus
+    followup_bus = original_bus
+    try:
+        agent.id = "Agent_8ea-7274-8000-3eb4154ed3e4"
+        agent.task_id = agent.id
+        agent.add_new_task("follow-up hyphen id")
+        followup_bus = agent.eventbus
+        assert followup_bus is not original_bus
+        assert followup_bus.name.isidentifier()
+        assert "-" not in followup_bus.name
+    finally:
+        for bus in {original_bus, followup_bus}:
+            _stop_eventbus(bus)
+
+
+def test_agents_with_same_task_id_get_unique_eventbus_names() -> None:
+    primary = _make_agent()
+    secondary = _make_agent(task_id=primary.id)
+
+    try:
+        assert primary.eventbus.name.isidentifier()
+        assert secondary.eventbus.name.isidentifier()
+        assert primary.eventbus.name != secondary.eventbus.name
+    finally:
+        _stop_eventbus(primary.eventbus)
+        _stop_eventbus(secondary.eventbus)
 
 
 def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
