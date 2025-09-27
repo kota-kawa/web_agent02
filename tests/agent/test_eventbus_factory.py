@@ -18,30 +18,34 @@ def clear_eventbus_names():
     EventBusFactory.clear_active_names()
 
 
-@pytest.mark.asyncio
-async def test_create_eventbus_name_is_sanitized_and_identifier():
-    bus, name = EventBusFactory.create(agent_id='81-76b6-8000-532ca6389eae')
+def test_create_eventbus_name_is_sanitized_and_identifier():
+    async def _run() -> None:
+        bus, name = EventBusFactory.create(agent_id='81-76b6-8000-532ca6389eae')
 
-    try:
-        assert name == bus.name
-        assert name.isidentifier()
-        assert '-' not in name
-    finally:
-        await bus.stop()
-        EventBusFactory.release(name)
+        try:
+            assert name == bus.name
+            assert name.isidentifier()
+            assert '-' not in name
+        finally:
+            await bus.stop()
+            EventBusFactory.release(name)
+
+    asyncio.run(_run())
 
 
-@pytest.mark.asyncio
-async def test_create_eventbus_name_is_unique_when_reserved():
-    bus1, name1 = EventBusFactory.create(agent_id='duplicate-id')
-    bus2, name2 = EventBusFactory.create(agent_id='duplicate-id')
+def test_create_eventbus_name_is_unique_when_reserved():
+    async def _run() -> None:
+        bus1, name1 = EventBusFactory.create(agent_id='duplicate-id')
+        bus2, name2 = EventBusFactory.create(agent_id='duplicate-id')
 
-    try:
-        assert name1 != name2
-    finally:
-        await asyncio.gather(bus1.stop(), bus2.stop())
-        EventBusFactory.release(name1)
-        EventBusFactory.release(name2)
+        try:
+            assert name1 != name2
+        finally:
+            await asyncio.gather(bus1.stop(), bus2.stop())
+            EventBusFactory.release(name1)
+            EventBusFactory.release(name2)
+
+    asyncio.run(_run())
 
 
 def test_sanitize_handles_problematic_input():
