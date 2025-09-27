@@ -535,42 +535,58 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		self._release_eventbus_name()
 
+		attempts: list[tuple[str, str]] = []
+
 		preferred_name_raw = self._generate_eventbus_name(force_random=force_random)
-		preferred_name = self._ensure_unique_eventbus_name(
-			self._sanitize_eventbus_name(preferred_name_raw)
-		)
+		attempts.append(("preferred", preferred_name_raw))
 
-		created_name = preferred_name
+		created_name = ""
+		bus: EventBus | None = None
+		last_error: Exception | None = None
 
-		try:
-			bus = EventBus(name=preferred_name)
-		except (ValueError, AssertionError) as exc:
-			fallback_candidate = self._generate_eventbus_name(force_random=True)
-			fallback_name = self._ensure_unique_eventbus_name(
-				self._sanitize_eventbus_name(fallback_candidate)
-			)
-			logger.warning(
-				'Failed to create EventBus with name %s (raw=%s, %s). Using fallback name %s',
-				preferred_name,
-				preferred_name_raw,
-				exc,
-				fallback_name,
-			)
-			created_name = fallback_name
+		idx = 0
+		while idx < len(attempts):
+			label, raw_name = attempts[idx]
+			idx += 1
+
+			sanitized = self._sanitize_eventbus_name(raw_name)
+			unique_candidate = self._ensure_unique_eventbus_name(sanitized)
+			final_candidate = self._sanitize_eventbus_name(unique_candidate)
+
 			try:
-				bus = EventBus(name=fallback_name)
-			except (ValueError, AssertionError) as fallback_exc:
-				emergency_name = self._ensure_unique_eventbus_name(
-					self._sanitize_eventbus_name(f'Agent_{uuid7str()}')
+				if not final_candidate.isidentifier():
+					raise ValueError(
+						f'Invalid EventBus identifier produced after sanitization: {final_candidate!r}'
+					)
+
+				bus = EventBus(name=final_candidate)
+				created_name = final_candidate
+				break
+			except (AssertionError, ValueError) as exc:
+				last_error = exc
+
+				log_message = (
+					'Failed to create EventBus with %s name %s (raw=%s, %s)'
 				)
+				if label == "preferred":
+					logger.warning(log_message + '. Trying fallback name.', label, final_candidate, raw_name, exc)
+					fallback_candidate = self._generate_eventbus_name(force_random=True)
+					attempts.append(("fallback", fallback_candidate))
+				elif label == "fallback":
+					logger.error(log_message + '. Using emergency name.', label, final_candidate, raw_name, exc)
+					emergency_candidate = f'Agent_{uuid7str()}'
+					attempts.append(("emergency", emergency_candidate))
+				else:
+					logger.error(log_message + '. No more candidates available.', label, final_candidate, raw_name, exc)
+
+		if bus is None:
+			if last_error is not None:
 				logger.error(
-					'Fallback EventBus creation failed with name %s (%s). Using emergency name %s',
-					fallback_name,
-					fallback_exc,
-					emergency_name,
+					'Creating named EventBus failed (%s). Falling back to anonymous EventBus().',
+					last_error,
 				)
-				created_name = emergency_name
-				bus = EventBus(name=emergency_name)
+			bus = EventBus()
+			created_name = bus.name
 
 		self._ACTIVE_EVENTBUS_NAMES.add(created_name)
 		self._reserved_eventbus_name = created_name
@@ -584,6 +600,16 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
 			self.eventbus.on('*', self.cloud_sync.handle_event)
+			try:
+				self.logger.debug(
+					'☁️ Re-registered cloud sync handler on EventBus %s',
+					self.eventbus.name,
+				)
+			except Exception:
+				logger.debug(
+					'☁️ Re-registered cloud sync handler on EventBus %s',
+					self.eventbus.name,
+				)
 
 		self._pending_eventbus_refresh = False
 	@property

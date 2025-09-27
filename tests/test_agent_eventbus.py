@@ -190,23 +190,49 @@ def test_add_new_task_during_run_defers_eventbus_refresh() -> None:
 
 
 def test_create_eventbus_sanitizes_invalid_names() -> None:
-	agent = _make_agent()
+        agent = _make_agent()
 
-	calls = {"random": 0}
+        calls = {"random": 0}
 
-	def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
-		if force_random:
-			calls["random"] += 1
-		return "Agent_c0c-5d6e-79d3-8000-5738eda3c6a7"
+        def always_invalid(self, *, force_random: bool = False) -> str:  # noqa: D401
+                if force_random:
+                        calls["random"] += 1
+                return "Agent_c0c-5d6e-79d3-8000-5738eda3c6a7"
 
-	agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
+        agent._generate_eventbus_name = types.MethodType(always_invalid, agent)  # type: ignore[attr-defined]
 
-	bus = agent._create_eventbus()
+        bus = agent._create_eventbus()
 
-	try:
-		assert isinstance(bus, EventBus)
-		assert bus.name.isidentifier()
-		assert "-" not in bus.name
-		assert calls["random"] == 0
-	finally:
-		_stop_eventbus(bus)
+        try:
+                assert isinstance(bus, EventBus)
+                assert bus.name.isidentifier()
+                assert "-" not in bus.name
+                assert calls["random"] == 0
+        finally:
+                _stop_eventbus(bus)
+
+
+def test_add_new_task_recovers_from_invalid_sanitizer(monkeypatch) -> None:
+        call_count = {"sanitize": 0}
+
+        def always_hyphenated(self, name: str) -> str:  # noqa: D401
+                call_count["sanitize"] += 1
+                return "Agent-invalid-name"
+
+        monkeypatch.setattr(Agent, "_sanitize_eventbus_name", always_hyphenated, raising=False)
+
+        agent = _make_agent()
+
+        created_buses = [agent.eventbus]
+
+        try:
+                for index in range(3):
+                        agent.running = False
+                        agent.add_new_task(f"retry-{index}")
+                        created_buses.append(agent.eventbus)
+                        assert agent.eventbus.name.isidentifier()
+        finally:
+                for bus in set(created_buses):
+                        _stop_eventbus(bus)
+
+        assert call_count["sanitize"] > 0
