@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import ClassVar
 
 from bubus import EventBus
@@ -43,10 +44,13 @@ class EventBusFactory:
         derived suffix so the function never returns an invalid identifier.
         """
 
-        candidate = name
+        candidate = unicodedata.normalize('NFKC', name)
 
         while True:
-            sanitized = ''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in candidate)
+            sanitized = ''.join(
+                ch if ch.isascii() and (ch.isalnum() or ch == '_') else '_'
+                for ch in candidate
+            )
             sanitized = re.sub(r'_+', '_', sanitized).strip('_')
 
             if not sanitized:
