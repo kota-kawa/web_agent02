@@ -209,7 +209,15 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if available_file_paths is None:
 			available_file_paths = []
 
-		self.id = task_id or uuid7str()
+		raw_task_id = task_id or uuid7str()
+		self.original_task_id: str = str(raw_task_id)
+		self.id = self._normalise_identifier(self.original_task_id)
+		if self.id != self.original_task_id:
+			logger.debug(
+				'Normalised agent task identifier from %r to %s to satisfy identifier safety checks',
+				self.original_task_id,
+				self.id,
+			)
 		self.task_id: str = self.id
 		self.session_id: str = uuid7str()
 		self.running: bool = False
@@ -448,6 +456,26 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# Event-based pause control (kept out of AgentState for serialization)
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
+
+	@staticmethod
+	def _normalise_identifier(identifier: str | None) -> str:
+		"""Return an alphanumeric identifier safe for internal agent bookkeeping."""
+
+		if identifier is None:
+			identifier = ''
+
+		normalised = ''.join(ch for ch in str(identifier) if ch.isalnum())
+
+		if normalised:
+			return normalised
+
+		fallback = uuid7str().replace('-', '')
+		logger.debug(
+			'Generated fallback agent identifier %s because the provided value %r contained no alphanumeric characters',
+			fallback,
+			identifier,
+		)
+		return fallback
 
 	def _create_eventbus(self, *, force_random: bool = False) -> tuple[EventBus, str | None]:
 		"""Create a new :class:`EventBus` instance with graceful fallback."""
