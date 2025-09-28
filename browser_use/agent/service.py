@@ -1711,11 +1711,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Stop the event bus gracefully, waiting for all events to be processed
 			# Use longer timeout to avoid deadlocks in tests with multiple agents
 			await self.eventbus.stop(timeout=3.0)
-			EventBusFactory.release(self._reserved_eventbus_name)
-			self._reserved_eventbus_name = None
-			
-			if self._pending_eventbus_refresh:
-				self._reset_eventbus()
+			self._reset_eventbus()
 
 			await self.close()
 
