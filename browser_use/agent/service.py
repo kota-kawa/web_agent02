@@ -126,6 +126,21 @@ AgentHookFunc = Callable[['Agent'], Awaitable[None]]
 
 class Agent(Generic[Context, AgentStructuredOutput]):
 
+	_WATCHDOG_ATTR_NAMES: ClassVar[tuple[str, ...]] = (
+		'_downloads_watchdog',
+		'_storage_state_watchdog',
+		'_local_browser_watchdog',
+		'_security_watchdog',
+		'_aboutblank_watchdog',
+		'_popups_watchdog',
+		'_permissions_watchdog',
+		'_default_action_watchdog',
+		'_screenshot_watchdog',
+		'_dom_watchdog',
+		'_recording_watchdog',
+		'_crash_watchdog',
+	)
+
 	@time_execution_sync('--init')
 	def __init__(
 		self,
@@ -434,6 +449,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# wal_path = CONFIG.BROWSER_USE_CONFIG_DIR / 'events' / f'{self.session_id}.jsonl'
 		self.eventbus, self._reserved_eventbus_name = self._create_eventbus()
 
+		self._refresh_browser_session_eventbus()
+
 		# Cloud sync service
 		self.enable_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
 		if self.enable_cloud_sync or cloud_sync is not None:
@@ -507,6 +524,38 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		fallback_bus = EventBus()
 		return fallback_bus, None
 
+	def _refresh_browser_session_eventbus(self, *, reset_watchdogs: bool = True) -> None:
+		"""Keep the browser session's EventBus aligned with the agent's EventBus."""
+
+		session = getattr(self, 'browser_session', None)
+		if session is None:
+			return
+
+		try:
+			session.event_bus = self.eventbus
+		except Exception:
+			logger.debug(
+				'Failed to synchronise browser session event bus with agent event bus',
+				exc_info=True,
+			)
+			return
+
+		if not reset_watchdogs:
+			return
+
+		if hasattr(session, '_watchdogs_attached'):
+			try:
+				session._watchdogs_attached = False
+			except Exception:
+				logger.debug(
+					'Failed to mark browser session watchdogs for reattachment',
+					exc_info=True,
+				)
+
+		for attr in self._WATCHDOG_ATTR_NAMES:
+			if hasattr(session, attr):
+				setattr(session, attr, None)
+
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
 
@@ -516,6 +565,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			EventBusFactory.release(previous_name)
 		self._reserved_eventbus_name = None
 		self.eventbus, self._reserved_eventbus_name = self._create_eventbus(force_random=True)
+
+		self._refresh_browser_session_eventbus()
 
 		if previous_bus is not None:
 			self._schedule_eventbus_stop(previous_bus)

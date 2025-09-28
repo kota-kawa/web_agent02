@@ -28,10 +28,16 @@ def _dummy_agent() -> Agent:
     agent._eventbus_cleanup_tasks = set()
     agent.enable_cloud_sync = False
     agent.cloud_sync = None
-    agent.browser_session = SimpleNamespace(id='browser1234', agent_focus=None)
+    agent.browser_session = SimpleNamespace(
+        id='browser1234',
+        agent_focus=None,
+        event_bus=None,
+        _watchdogs_attached=False,
+    )
     agent.state = SimpleNamespace(follow_up_task=False)
     agent._message_manager = SimpleNamespace(add_new_task=lambda *_: None)
     agent.eventbus = EventBusFactory.create(agent_id=agent.id)[0]
+    agent._refresh_browser_session_eventbus()
     return agent
 
 
@@ -55,6 +61,7 @@ def test_reset_eventbus_falls_back_to_anonymous(monkeypatch) -> None:
 
         assert release_calls == ['Agent_old']
         assert agent.eventbus is not previous_bus
+        assert agent.browser_session.event_bus is agent.eventbus
         assert agent._reserved_eventbus_name is None
         assert agent._pending_eventbus_refresh is False
     finally:
@@ -105,7 +112,49 @@ def test_reset_eventbus_stops_previous_bus_when_idle(monkeypatch) -> None:
     assert stop_calls == [3.0]
     assert releases == ['Agent_old']
     assert agent.eventbus is new_bus
+    assert agent.browser_session.event_bus is new_bus
     assert agent._reserved_eventbus_name == 'Agent_new'
+
+
+def test_reset_eventbus_marks_watchdogs_for_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _dummy_agent()
+    initial_bus = agent.eventbus
+
+    session = SimpleNamespace(
+        id='browser1234',
+        agent_focus=None,
+        event_bus=initial_bus,
+        _watchdogs_attached=True,
+    )
+    for attr in Agent._WATCHDOG_ATTR_NAMES:
+        setattr(session, attr, object())
+
+    agent.browser_session = session
+
+    class DummyEventBus:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def stop(self, *_: Any, **__: Any) -> None:
+            pass
+
+        def on(self, *_: Any, **__: Any) -> None:
+            pass
+
+    new_bus = DummyEventBus('Agent_new')
+
+    monkeypatch.setattr(agent, '_create_eventbus', lambda force_random=True: (new_bus, 'Agent_new'))
+
+    try:
+        agent._reset_eventbus()
+
+        assert agent.browser_session.event_bus is new_bus
+        assert agent.browser_session._watchdogs_attached is False
+        for attr in Agent._WATCHDOG_ATTR_NAMES:
+            assert getattr(agent.browser_session, attr, None) is None
+    finally:
+        asyncio.run(initial_bus.stop())
+        EventBusFactory.release('Agent_new')
 
 
 def test_add_new_task_resets_eventbus_when_idle(monkeypatch) -> None:
@@ -136,6 +185,7 @@ def test_agent_identifier_is_normalised_for_eventbus() -> None:
         assert agent.task_id == agent.id
         assert agent.eventbus.name.isidentifier()
         assert '-' not in agent.eventbus.name
+        assert agent.browser_session.event_bus is agent.eventbus
     finally:
         reserved_name = agent._reserved_eventbus_name
         asyncio.run(agent.eventbus.stop())
@@ -150,6 +200,7 @@ def test_follow_up_task_uses_identifier_eventbus() -> None:
         initial_bus = agent.eventbus
         assert initial_bus.name.isidentifier()
         assert '-' not in initial_bus.name
+        assert agent.browser_session.event_bus is initial_bus
 
         agent.running = False
         agent.add_new_task('さらに詳しく')
@@ -157,6 +208,7 @@ def test_follow_up_task_uses_identifier_eventbus() -> None:
         assert agent.eventbus is not initial_bus
         assert agent.eventbus.name.isidentifier()
         assert '-' not in agent.eventbus.name
+        assert agent.browser_session.event_bus is agent.eventbus
     finally:
         final_name = agent._reserved_eventbus_name
         asyncio.run(initial_bus.stop())
@@ -173,6 +225,7 @@ def test_add_new_task_renormalises_mutated_identifier() -> None:
         initial_name = initial_bus.name
 
         assert '-' not in initial_name
+        assert agent.browser_session.event_bus is initial_bus
 
         agent.running = False
         agent.id = 'hyphenated-identifier'
@@ -183,6 +236,7 @@ def test_add_new_task_renormalises_mutated_identifier() -> None:
         assert agent.eventbus is not initial_bus
         assert agent.eventbus.name.isidentifier()
         assert '-' not in agent.eventbus.name
+        assert agent.browser_session.event_bus is agent.eventbus
     finally:
         final_name = agent._reserved_eventbus_name
         asyncio.run(initial_bus.stop())
