@@ -224,6 +224,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._pending_eventbus_refresh: bool = False
 		self.last_response_time: float = 0.0
 		self._reserved_eventbus_name: str | None = None
+		self._eventbus_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 		browser_profile = browser_profile or DEFAULT_BROWSER_PROFILE
 
@@ -509,11 +510,15 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
 
+		previous_bus = getattr(self, 'eventbus', None)
 		previous_name = self._reserved_eventbus_name
 		if previous_name:
 			EventBusFactory.release(previous_name)
 		self._reserved_eventbus_name = None
 		self.eventbus, self._reserved_eventbus_name = self._create_eventbus(force_random=True)
+
+		if previous_bus is not None:
+			self._schedule_eventbus_stop(previous_bus)
 
 		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
 			self.eventbus.on('*', self.cloud_sync.handle_event)
@@ -529,6 +534,40 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				)
 
 		self._pending_eventbus_refresh = False
+
+	def _schedule_eventbus_stop(self, bus: EventBus, *, timeout: float = 3.0) -> None:
+		"""Schedule ``bus.stop`` and fall back to synchronous execution when needed."""
+
+		async def _stop_bus() -> None:
+			try:
+				await bus.stop(timeout=timeout)
+			except Exception:  # pragma: no cover - defensive logging path
+				logger.exception('Failed to stop EventBus %s cleanly', getattr(bus, 'name', '<anonymous>'))
+
+		try:
+			loop = asyncio.get_running_loop()
+		except RuntimeError:
+			try:
+				asyncio.run(_stop_bus())
+			except RuntimeError:
+				# If we're already inside a running loop but couldn't obtain it (unlikely),
+				# fall back to a dedicated event loop for cleanup.
+				new_loop = asyncio.new_event_loop()
+				try:
+					new_loop.run_until_complete(_stop_bus())
+				finally:
+					new_loop.close()
+			except Exception:  # pragma: no cover - defensive logging path
+				logger.exception('Unexpected error while stopping EventBus %s', getattr(bus, 'name', '<anonymous>'))
+		else:
+			task = loop.create_task(_stop_bus())
+			cleanup_tasks = getattr(self, '_eventbus_cleanup_tasks', None)
+			if cleanup_tasks is not None:
+				cleanup_tasks.add(task)
+				task.add_done_callback(cleanup_tasks.discard)
+			else:
+				task.add_done_callback(lambda _t: None)
+
 	@property
 	def logger(self) -> logging.Logger:
 		"""Get instance-specific logger with task ID in the name"""

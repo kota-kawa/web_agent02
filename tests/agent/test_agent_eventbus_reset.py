@@ -25,6 +25,7 @@ def _dummy_agent() -> Agent:
     agent.task_id = agent.id
     agent._reserved_eventbus_name = 'Agent_old'
     agent._pending_eventbus_refresh = True
+    agent._eventbus_cleanup_tasks = set()
     agent.enable_cloud_sync = False
     agent.cloud_sync = None
     agent.browser_session = SimpleNamespace(id='browser1234', agent_focus=None)
@@ -59,6 +60,52 @@ def test_reset_eventbus_falls_back_to_anonymous(monkeypatch) -> None:
     finally:
         asyncio.run(previous_bus.stop())
         asyncio.run(agent.eventbus.stop())
+
+
+def test_reset_eventbus_stops_previous_bus_when_idle(monkeypatch) -> None:
+    stop_calls: list[float | None] = []
+
+    class DummyEventBus:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def stop(self, timeout: float | None = None) -> None:
+            stop_calls.append(timeout)
+
+        def on(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+    agent = Agent.__new__(Agent)
+    agent.id = 'test-agent-id'
+    agent.task_id = agent.id
+    agent._reserved_eventbus_name = 'Agent_old'
+    agent._pending_eventbus_refresh = False
+    agent.enable_cloud_sync = False
+    agent.cloud_sync = None
+    agent.browser_session = SimpleNamespace(id='browser1234', agent_focus=None)
+    agent.state = SimpleNamespace(follow_up_task=False)
+    agent._message_manager = SimpleNamespace(add_new_task=lambda *_: None)
+    agent._eventbus_cleanup_tasks = set()
+
+    previous_bus = DummyEventBus('OldBus')
+    agent.eventbus = previous_bus
+
+    releases: list[str | None] = []
+
+    def fake_release(name: str | None) -> None:
+        releases.append(name)
+
+    new_bus = DummyEventBus('NewBus')
+
+    monkeypatch.setattr('browser_use.agent.service.EventBusFactory.release', fake_release)
+    monkeypatch.setattr(agent, '_create_eventbus', lambda force_random=True: (new_bus, 'Agent_new'))
+
+    agent._reset_eventbus()
+
+    assert stop_calls == [3.0]
+    assert releases == ['Agent_old']
+    assert agent.eventbus is new_bus
+    assert agent._reserved_eventbus_name == 'Agent_new'
 
 
 def test_add_new_task_resets_eventbus_when_idle(monkeypatch) -> None:
