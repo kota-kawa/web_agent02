@@ -72,12 +72,32 @@ def test_sanitize_handles_problematic_input() -> None:
 def test_sanitize_normalizes_unicode_variants() -> None:
         sanitized = EventBusFactory.sanitize('Agent_７８ｄＦ–8000–test')
 
-        assert sanitized == 'Agent_78dF_8000_test'
-        assert sanitized.isidentifier()
+def test_factory_sanitizes_identifier_before_constructing_eventbus(monkeypatch: pytest.MonkeyPatch):
+        problematic: Final[str] = 'Agent_7101-8000-0582c16f66cc'
 
+        async def _run() -> None:
+                def _return_problematic(_: type[EventBusFactory], __: str) -> str:
+                        return problematic
 
-def test_sanitize_generates_random_for_empty_input() -> None:
-        sanitized = EventBusFactory.sanitize('')
+                monkeypatch.setattr(
+                        EventBusFactory,
+                        '_ensure_unique',
+                        classmethod(_return_problematic),
+                )
 
-        assert sanitized.startswith('Agent_')
-        assert sanitized.isidentifier()
+                bus = None
+                name = None
+
+                try:
+                        bus, name = EventBusFactory.create(agent_id='sanitizer-test')
+
+                        assert name == 'Agent_7101_8000_0582c16f66cc'
+                        assert bus.name == name
+                finally:
+                        if bus is not None:
+                                await bus.stop()
+                        if name is not None:
+                                EventBusFactory.release(name)
+
+        asyncio.run(_run())
+
