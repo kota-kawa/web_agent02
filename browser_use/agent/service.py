@@ -481,7 +481,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	def _reset_eventbus(self) -> None:
 		"""Replace the current :class:`EventBus` with a fresh instance."""
 
-		EventBusFactory.release(self._reserved_eventbus_name)
+		previous_name = self._reserved_eventbus_name
+		if previous_name:
+			EventBusFactory.release(previous_name)
+		self._reserved_eventbus_name = None
 		self.eventbus, self._reserved_eventbus_name = self._create_eventbus(force_random=True)
 
 		if hasattr(self, 'cloud_sync') and self.cloud_sync and self.enable_cloud_sync:
@@ -667,6 +670,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if self.running:
 			# Defer recreation until the active run finishes shutting down its EventBus.
 			self._pending_eventbus_refresh = True
+			try:
+				self.logger.debug('🚌 Deferring EventBus reset until run shutdown completes')
+			except Exception:
+				logger.debug('🚌 Deferring EventBus reset until run shutdown completes')
 		else:
 			# Create the new EventBus immediately when the agent is idle.
 			self._reset_eventbus()
