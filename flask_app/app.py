@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import asyncio
 import copy
+import inspect
 import json
 import logging
 import os
@@ -854,23 +855,25 @@ class BrowserAgentController:
             )
         finally:
             keep_alive = session.browser_profile.keep_alive
+            rotate_session = False
             if keep_alive:
-                drained_cleanly = True
                 drain_method = getattr(type(session), 'drain_event_bus', None)
                 if callable(drain_method):
                     try:
                         drained_cleanly = await drain_method(session)
                     except Exception:  # noqa: BLE001
-                        drained_cleanly = False
+                        rotate_session = True
                         self._logger.warning(
                             'Failed to drain browser event bus; rotating for safety.',
                             exc_info=True,
                         )
                     else:
                         if not drained_cleanly:
-                            self._logger.warning('Browser event bus rotated after drain timeout; pending events cleared.')
+                            rotate_session = True
+                            self._logger.warning(
+                                'Browser event bus rotated after drain timeout; pending events cleared.',
+                            )
                 else:
-                    drained_cleanly = False
                     self._logger.debug(
                         'Browser session implementation does not expose drain_event_bus(); applying compatibility cleanup.',
                     )
@@ -883,9 +886,25 @@ class BrowserAgentController:
             else:
                 with suppress(Exception):
                     await session.stop()
+
+            if rotate_session:
+                with suppress(Exception):
+                    await session.stop()
+                kill_method = getattr(session, 'kill', None)
+                if callable(kill_method):
+                    with suppress(Exception):
+                        maybe_kill = kill_method()
+                        if inspect.isawaitable(maybe_kill):
+                            await maybe_kill
+
             with self._state_lock:
                 if self._browser_session is session:
-                    if keep_alive:
+                    if rotate_session:
+                        self._browser_session = None
+                        self._logger.info(
+                            'Browser session rotated after event bus drain failure; a fresh session will be created on the next run.',
+                        )
+                    elif keep_alive:
                         self._logger.debug(
                             'Browser session kept alive for follow-up runs.',
                         )
