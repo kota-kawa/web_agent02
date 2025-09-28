@@ -117,6 +117,7 @@ class EventBusFactory:
             label, raw_name = attempts.pop(0)
             sanitized = cls.sanitize(raw_name)
             unique_name = cls._ensure_unique(sanitized)
+            unique_name = cls.sanitize(unique_name)
 
             try:
                 bus = EventBus(name=unique_name)

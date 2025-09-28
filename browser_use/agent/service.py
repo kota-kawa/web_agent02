@@ -695,6 +695,26 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.state.follow_up_task = True
 
 		# Ensure follow-up runs never reuse the previous EventBus identifier.
+		identifier_changed = False
+		normalised_id = self._normalise_identifier(self.id)
+		if normalised_id != self.id:
+			identifier_changed = True
+			try:
+				self.logger.debug(
+					'Normalised agent identifier from %r to %s before refreshing EventBus',
+					self.id,
+					normalised_id,
+				)
+			except Exception:
+				logger.debug(
+					'Normalised agent identifier from %r to %s before refreshing EventBus',
+					self.id,
+					normalised_id,
+				)
+
+		self.id = normalised_id
+		self.task_id = normalised_id
+
 		if self.running:
 			# Defer recreation until the active run finishes shutting down its EventBus.
 			self._pending_eventbus_refresh = True
@@ -703,6 +723,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			except Exception:
 				logger.debug('🚌 Deferring EventBus reset until run shutdown completes')
 		else:
+			if identifier_changed and getattr(self, '_reserved_eventbus_name', None):
+				EventBusFactory.release(self._reserved_eventbus_name)
+				self._reserved_eventbus_name = None
 			# Create the new EventBus immediately when the agent is idle.
 			self._reset_eventbus()
 

@@ -118,6 +118,33 @@ def test_follow_up_task_uses_identifier_eventbus() -> None:
             EventBusFactory.release(final_name)
 
 
+def test_add_new_task_renormalises_mutated_identifier() -> None:
+    agent = Agent(task='人口推移を確認', task_id='95c0-2a1f-7f84', llm=None)
+
+    try:
+        initial_bus = agent.eventbus
+        initial_name = initial_bus.name
+
+        assert '-' not in initial_name
+
+        agent.running = False
+        agent.id = 'hyphenated-identifier'
+        agent.task_id = agent.id
+
+        agent.add_new_task('さらに詳しく教えて')
+
+        assert agent.eventbus is not initial_bus
+        assert agent.eventbus.name.isidentifier()
+        assert '-' not in agent.eventbus.name
+    finally:
+        final_name = agent._reserved_eventbus_name
+        asyncio.run(initial_bus.stop())
+        asyncio.run(agent.eventbus.stop())
+        EventBusFactory.release(initial_name)
+        if final_name:
+            EventBusFactory.release(final_name)
+
+
 @pytest.mark.asyncio
 async def test_run_recreates_eventbus_and_reemits_create_events(monkeypatch) -> None:
     class DummySignalHandler:
