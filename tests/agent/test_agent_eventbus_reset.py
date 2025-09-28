@@ -80,6 +80,22 @@ def test_add_new_task_resets_eventbus_when_idle(monkeypatch) -> None:
         asyncio.run(agent.eventbus.stop())
 
 
+def test_agent_identifier_is_normalised_for_eventbus() -> None:
+    agent = Agent(task='男女比も知りたい', task_id='046-263f-7982-8000-7a6c04b16bcb', llm=None)
+
+    try:
+        assert agent.original_task_id == '046-263f-7982-8000-7a6c04b16bcb'
+        assert agent.id == '046263f798280007a6c04b16bcb'
+        assert agent.task_id == agent.id
+        assert agent.eventbus.name.isidentifier()
+        assert '-' not in agent.eventbus.name
+    finally:
+        reserved_name = agent._reserved_eventbus_name
+        asyncio.run(agent.eventbus.stop())
+        if reserved_name:
+            EventBusFactory.release(reserved_name)
+
+
 def test_follow_up_task_uses_identifier_eventbus() -> None:
     agent = Agent(task='男女比も知りたい', task_id='7101-8000-0582c16f66cc', llm=None)
 
