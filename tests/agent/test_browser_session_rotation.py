@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+import logging
+from types import MethodType, SimpleNamespace
 
 import pytest
+from bubus import EventBus
 from bubus.service import QueueShutDown
 
 from flask_app.app import BrowserAgentController
+from browser_use.browser.events import BrowserStateRequestEvent
+from browser_use.browser.session import BrowserSession
+from browser_use.browser.views import BrowserStateSummary
 
 
 class _DummyProfile:
@@ -106,3 +111,53 @@ async def test_browser_session_rotates_after_event_bus_shutdown(monkeypatch) -> 
         assert new_session is not first_session
     finally:
         controller.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_get_browser_state_summary_recovers_from_value_error(caplog) -> None:
+    session = BrowserSession()
+
+    summary = BrowserStateSummary(
+        dom_state=SimpleNamespace(selector_map={1: object()}),
+        url='https://example.com',
+        title='Example',
+        tabs=[],
+    )
+
+    class _DummyEvent:
+        def __init__(self, should_error: bool) -> None:
+            self._should_error = should_error
+            self._call_count = 0
+
+        async def event_result(self, *_: object, **__: object) -> BrowserStateSummary:
+            self._call_count += 1
+            if self._should_error and self._call_count == 1:
+                raise ValueError('Expected at least one handler to return BrowserStateSummary')
+            return summary
+
+    dispatch_count = 0
+
+    def _fake_dispatch(self: EventBus, event: BrowserStateRequestEvent) -> _DummyEvent:
+        nonlocal dispatch_count
+        dispatch_count += 1
+        return _DummyEvent(should_error=dispatch_count == 1)
+
+    session.event_bus.handlers[BrowserStateRequestEvent.__name__] = [object()]
+    session.event_bus.dispatch = MethodType(_fake_dispatch, session.event_bus)
+    setattr(session, '_watchdogs_attached', True)
+
+    attach_calls = 0
+
+    async def _fake_attach_all_watchdogs(self: BrowserSession) -> None:
+        nonlocal attach_calls
+        attach_calls += 1
+
+    session.__dict__['attach_all_watchdogs'] = MethodType(_fake_attach_all_watchdogs, session)
+
+    caplog.set_level(logging.WARNING)
+
+    result = await session.get_browser_state_summary(include_screenshot=False)
+
+    assert result == summary
+    assert attach_calls == 1
+    assert 'handler_count=1' in caplog.text

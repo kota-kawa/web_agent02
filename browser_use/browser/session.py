@@ -1016,12 +1016,16 @@ class BrowserSession(BaseModel):
 				return result
 			except ValueError as exc:
 				handlers = self.event_bus.handlers.get(BrowserStateRequestEvent.__name__, [])
-				is_missing_handler = not handlers and 'Expected at least one handler' in str(exc)
+				handler_count = len(handlers)
+				message = str(exc)
+				should_force_reattach = 'Expected at least one handler' in message and attempt == 0
 
-				if is_missing_handler and attempt == 0:
+				if should_force_reattach:
 					self.logger.warning(
-						'BrowserStateRequestEvent has no registered handlers; '
-						're-attaching watchdogs and retrying once.'
+						'BrowserStateRequestEvent handler ValueError detected '
+						'(handler_count=%s): %s; re-attaching watchdogs and retrying once.',
+						handler_count,
+						message,
 					)
 
 					# Force reattachment in case the internal flag is stale
@@ -1032,7 +1036,7 @@ class BrowserSession(BaseModel):
 					last_error = exc
 					continue
 
-				raise
+			raise
 
 		if last_error:
 			raise last_error
