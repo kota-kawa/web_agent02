@@ -775,6 +775,65 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		else:
 			self.DoneAgentOutput = AgentOutput.type_with_custom_actions_no_thinking(self.DoneActionModel)
 
+	@staticmethod
+	def _is_legacy_eventbus_name(name: str | None) -> bool:
+		"""Return ``True`` when *name* cannot be used as an identifier."""
+
+		if not name:
+			return False
+
+		return not str(name).isidentifier()
+
+	def _refresh_legacy_eventbus_state(self) -> bool:
+		"""Upgrade legacy EventBus instances with invalid identifiers.
+
+		Older agent runs created ``EventBus`` objects using identifiers that
+		are no longer accepted by ``bubus`` (e.g. names containing ``-``).
+		When those agents receive follow-up tasks, attempting to reuse the
+		legacy identifier raises an ``AssertionError`` before any recovery
+		logic can run.  By pro-actively detecting these legacy identifiers
+		and rotating the EventBus to a fresh, sanitised name we guarantee
+		that follow-up tasks continue executing without forcing the
+		controller to recreate the entire agent.
+
+		Returns ``True`` when a migration was performed.
+		"""
+
+		eventbus = getattr(self, 'eventbus', None)
+		reserved_name = getattr(self, '_reserved_eventbus_name', None)
+
+		needs_refresh = self._is_legacy_eventbus_name(getattr(eventbus, 'name', None))
+		needs_refresh = needs_refresh or self._is_legacy_eventbus_name(reserved_name)
+
+		if not needs_refresh:
+			return False
+
+		if self.running:
+			# Follow-up tasks are only scheduled when the agent is idle, but
+			# keep the defensive branch for completeness.
+			self._pending_eventbus_refresh = True
+			try:
+				self.logger.debug('🚌 Detected legacy EventBus while running; refresh deferred')
+			except Exception:
+				logger.debug('🚌 Detected legacy EventBus while running; refresh deferred')
+			return False
+
+		try:
+			self.logger.debug(
+				'♻️ Refreshing legacy EventBus %r (reserved=%r) before follow-up task',
+				getattr(eventbus, 'name', None),
+				reserved_name,
+			)
+		except Exception:
+			logger.debug(
+				'♻️ Refreshing legacy EventBus %r (reserved=%r) before follow-up task',
+				getattr(eventbus, 'name', None),
+				reserved_name,
+			)
+
+		self._reset_eventbus()
+		return True
+
 	def add_new_task(self, new_task: str) -> None:
 		"""Add a new task to the agent, keeping the same task_id as tasks are continuous"""
 		# Simply delegate to message manager - no need for new task_id or events
@@ -805,6 +864,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self.id = normalised_id
 		self.task_id = normalised_id
 
+		legacy_rotated = self._refresh_legacy_eventbus_state()
+
+		if not legacy_rotated and identifier_changed and getattr(self, '_reserved_eventbus_name', None):
+			# Release names that are no longer valid so the new EventBus can
+			# claim a fresh, sanitised identifier.
+			EventBusFactory.release(self._reserved_eventbus_name)
+			self._reserved_eventbus_name = None
+
 		if self.running:
 			# Defer recreation until the active run finishes shutting down its EventBus.
 			self._pending_eventbus_refresh = True
@@ -812,11 +879,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.logger.debug('🚌 Deferring EventBus reset until run shutdown completes')
 			except Exception:
 				logger.debug('🚌 Deferring EventBus reset until run shutdown completes')
-		else:
-			if identifier_changed and getattr(self, '_reserved_eventbus_name', None):
-				EventBusFactory.release(self._reserved_eventbus_name)
-				self._reserved_eventbus_name = None
-			# Create the new EventBus immediately when the agent is idle.
+		elif not legacy_rotated:
+			# Create the new EventBus immediately when the agent is idle or after
+			# migrating away from a legacy identifier.
 			self._reset_eventbus()
 
 

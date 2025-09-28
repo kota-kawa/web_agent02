@@ -246,6 +246,40 @@ def test_add_new_task_renormalises_mutated_identifier() -> None:
             EventBusFactory.release(final_name)
 
 
+def test_add_new_task_upgrades_legacy_eventbus(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _dummy_agent()
+    agent.running = False
+
+    class LegacyEventBus:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.stopped_with: list[float | None] = []
+
+        async def stop(self, timeout: float | None = None) -> None:
+            self.stopped_with.append(timeout)
+
+        def on(self, *_: Any, **__: Any) -> None:
+            pass
+
+    legacy_bus = LegacyEventBus('Agent-legacy-id')
+    agent.eventbus = legacy_bus
+    agent.browser_session.event_bus = legacy_bus
+    agent._reserved_eventbus_name = 'Agent-legacy-id'
+
+    new_bus = LegacyEventBus('Agent_new')
+
+    monkeypatch.setattr(agent, '_create_eventbus', lambda force_random=True: (new_bus, 'Agent_new'))
+
+    agent.add_new_task('さらに詳しく教えて')
+
+    assert agent.eventbus is new_bus
+    assert agent.browser_session.event_bus is new_bus
+    assert agent._reserved_eventbus_name == 'Agent_new'
+    assert legacy_bus.stopped_with == [3.0]
+
+    EventBusFactory.release('Agent_new')
+
+
 @pytest.mark.asyncio
 async def test_run_recreates_eventbus_and_reemits_create_events(monkeypatch) -> None:
     class DummySignalHandler:
