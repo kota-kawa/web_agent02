@@ -994,23 +994,50 @@ class BrowserSession(BaseModel):
 				self.logger.debug('⚠️ Cached browser state has 0 interactive elements, fetching fresh state')
 				# Fall through to fetch fresh state
 
-		# Dispatch the event and wait for result
-		event: BrowserStateRequestEvent = cast(
-			BrowserStateRequestEvent,
-			self.event_bus.dispatch(
-				BrowserStateRequestEvent(
-					include_dom=True,
-					include_screenshot=include_screenshot,
-					cache_clickable_elements_hashes=cache_clickable_elements_hashes,
-					include_recent_events=include_recent_events,
-				)
-			),
-		)
+		last_error: Exception | None = None
+		for attempt in range(2):
+			# Dispatch the event and wait for result
+			event: BrowserStateRequestEvent = cast(
+				BrowserStateRequestEvent,
+				self.event_bus.dispatch(
+					BrowserStateRequestEvent(
+						include_dom=True,
+						include_screenshot=include_screenshot,
+						cache_clickable_elements_hashes=cache_clickable_elements_hashes,
+						include_recent_events=include_recent_events,
+					)
+				),
+			)
 
-		# The handler returns the BrowserStateSummary directly
-		result = await event.event_result(raise_if_none=True, raise_if_any=True)
-		assert result is not None and result.dom_state is not None
-		return result
+			try:
+				# The handler returns the BrowserStateSummary directly
+				result = await event.event_result(raise_if_none=True, raise_if_any=True)
+				assert result is not None and result.dom_state is not None
+				return result
+			except ValueError as exc:
+				handlers = self.event_bus.handlers.get(BrowserStateRequestEvent.__name__, [])
+				is_missing_handler = not handlers and 'Expected at least one handler' in str(exc)
+
+				if is_missing_handler and attempt == 0:
+					self.logger.warning(
+						'BrowserStateRequestEvent has no registered handlers; '
+						're-attaching watchdogs and retrying once.'
+					)
+
+					# Force reattachment in case the internal flag is stale
+					if hasattr(self, '_watchdogs_attached'):
+						self._watchdogs_attached = False  # type: ignore[attr-defined]
+
+					await self.attach_all_watchdogs()
+					last_error = exc
+					continue
+
+				raise
+
+		if last_error:
+			raise last_error
+
+		raise RuntimeError('Failed to obtain browser state summary after retrying without handlers')
 
 	async def attach_all_watchdogs(self) -> None:
 		"""Initialize and attach all watchdogs with explicit handler registration."""
