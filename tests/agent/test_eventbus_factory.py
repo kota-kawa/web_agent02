@@ -2,7 +2,6 @@ import asyncio
 from typing import Final
 
 import pytest
-from bubus import EventBus
 
 from browser_use.agent.eventbus import EventBusFactory
 
@@ -60,15 +59,31 @@ def test_sanitize_normalizes_unicode_variants():
 	assert sanitized.isidentifier()
 
 
-def test_eventbus_constructor_auto_sanitizes_invalid_identifier():
-	problematic: Final[str] = 'Agent_7101-8000-0582c16f66cc'
+def test_factory_sanitizes_identifier_before_constructing_eventbus(monkeypatch: pytest.MonkeyPatch):
+        problematic: Final[str] = 'Agent_7101-8000-0582c16f66cc'
 
-	async def _run() -> None:
-		bus = EventBus(name=problematic)
+        async def _run() -> None:
+                def _return_problematic(_: type[EventBusFactory], __: str) -> str:
+                        return problematic
 
-		try:
-			assert bus.name == 'Agent_7101_8000_0582c16f66cc'
-		finally:
-			await bus.stop()
+                monkeypatch.setattr(
+                        EventBusFactory,
+                        '_ensure_unique',
+                        classmethod(_return_problematic),
+                )
 
-	asyncio.run(_run())
+                bus = None
+                name = None
+
+                try:
+                        bus, name = EventBusFactory.create(agent_id='sanitizer-test')
+
+                        assert name == 'Agent_7101_8000_0582c16f66cc'
+                        assert bus.name == name
+                finally:
+                        if bus is not None:
+                                await bus.stop()
+                        if name is not None:
+                                EventBusFactory.release(name)
+
+        asyncio.run(_run())
