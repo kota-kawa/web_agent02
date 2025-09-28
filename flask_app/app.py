@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from flask.typing import ResponseReturnValue
 
+from bubus import EventBus
+
 from browser_use import Agent, BrowserProfile, BrowserSession
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
 from browser_use.browser.views import BrowserStateSummary
@@ -883,6 +885,19 @@ class BrowserAgentController:
                     if callable(reset_method):
                         with suppress(Exception):
                             reset_method()
+                    else:
+                        self._logger.debug(
+                            'Legacy browser session missing _reset_event_bus_state(); refreshing EventBus manually.',
+                        )
+                        try:
+                            session.event_bus = EventBus()
+                            session.model_post_init(None)
+                        except Exception:  # noqa: BLE001
+                            rotate_session = True
+                            self._logger.warning(
+                                'Failed to refresh EventBus on legacy browser session; scheduling full rotation.',
+                                exc_info=True,
+                            )
             else:
                 with suppress(Exception):
                     await session.stop()
