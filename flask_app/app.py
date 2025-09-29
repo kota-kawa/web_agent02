@@ -736,13 +736,6 @@ class BrowserAgentController:
         session = await self._ensure_browser_session()
         session_recreated = self._consume_session_recreated()
 
-        attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
-        if attach_watchdogs is not None:
-            try:
-                await attach_watchdogs()
-            except Exception:  # noqa: BLE001
-                self._logger.debug('Failed to pre-attach browser watchdogs', exc_info=True)
-
         step_message_ids: dict[int, int] = {}
         starting_step_number = 1
         history_start_index = 0
@@ -815,6 +808,14 @@ class BrowserAgentController:
                 self._logger.info('Recreated agent after failure and retrying task %r.', task)
             except Exception as exc:  # noqa: BLE001
                 raise AgentControllerError(f'追加の指示の適用に失敗しました: {exc}') from exc
+
+        # Ensure watchdogs are properly attached after agent setup (including follow-up tasks)
+        attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
+        if attach_watchdogs is not None:
+            try:
+                await attach_watchdogs()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to attach browser watchdogs after agent setup', exc_info=True)
 
         history_items = getattr(agent, 'history', None)
         if history_items is not None:
