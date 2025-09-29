@@ -497,7 +497,9 @@ button:not(:disabled) {
 
 .prompt-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   font-size: 0.78rem;
   color: #94a3b8;
 }
@@ -531,6 +533,38 @@ button:not(:disabled) {
 
 .submit-button .button-icon {
   line-height: 1;
+}
+
+.new-task-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.95rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(37, 99, 235, 0.45);
+  background: rgba(37, 99, 235, 0.12);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1d4ed8;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.new-task-button:hover,
+.new-task-button:focus-visible {
+  background: rgba(37, 99, 235, 0.2);
+  color: #1e3a8a;
+  transform: translateY(-1px);
+}
+
+.new-task-button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.7);
+  outline-offset: 2px;
+}
+
+.new-task-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .prompt-form.is-sending .submit-button {

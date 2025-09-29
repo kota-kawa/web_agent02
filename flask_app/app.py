@@ -736,13 +736,6 @@ class BrowserAgentController:
         session = await self._ensure_browser_session()
         session_recreated = self._consume_session_recreated()
 
-        attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
-        if attach_watchdogs is not None:
-            try:
-                await attach_watchdogs()
-            except Exception:  # noqa: BLE001
-                self._logger.debug('Failed to pre-attach browser watchdogs', exc_info=True)
-
         step_message_ids: dict[int, int] = {}
         starting_step_number = 1
         history_start_index = 0
@@ -821,6 +814,13 @@ class BrowserAgentController:
             history_start_index = len(history_items.history)
         starting_step_number = getattr(getattr(agent, 'state', None), 'n_steps', 1) or 1
         self._clear_step_message_ids()
+
+        attach_watchdogs = getattr(session, 'attach_all_watchdogs', None)
+        if attach_watchdogs is not None:
+            try:
+                await attach_watchdogs()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to pre-attach browser watchdogs', exc_info=True)
 
         with self._state_lock:
             self._current_agent = agent
@@ -1265,40 +1265,97 @@ def stream() -> ResponseReturnValue:
 def chat() -> ResponseReturnValue:
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get('prompt') or '').strip()
+    start_new_task = bool(payload.get('new_task'))
 
     if not prompt:
         return jsonify({'error': 'プロンプトを入力してください。'}), 400
 
-    _append_history_message('user', prompt)
-
     try:
         controller = _get_agent_controller()
-        if controller.is_running():
-            try:
-                controller.enqueue_follow_up(prompt)
-            except AgentControllerError as exc:
-                message = f'フォローアップの指示の適用に失敗しました: {exc}'
-                logger.warning(message)
-                _append_history_message('assistant', message)
-                return (
-                    jsonify({'messages': _copy_history(), 'run_summary': message, 'queued': False}),
-                    200,
-                )
+    except AgentControllerError as exc:
+        _append_history_message('user', prompt)
+        message = f'エージェントの実行に失敗しました: {exc}'
+        logger.warning(message)
+        _append_history_message('assistant', message)
+        _broadcaster.publish(
+            {
+                'type': 'status',
+                'payload': {
+                    'agent_running': False,
+                    'run_summary': message,
+                },
+            }
+        )
+        return jsonify({'messages': _copy_history(), 'run_summary': message}), 200
+    except Exception as exc:  # noqa: BLE001
+        _append_history_message('user', prompt)
+        logger.exception('Unexpected error while running browser agent')
+        error_message = f'エージェントの実行中に予期しないエラーが発生しました: {exc}'
+        _append_history_message('assistant', error_message)
+        _broadcaster.publish(
+            {
+                'type': 'status',
+                'payload': {
+                    'agent_running': False,
+                    'run_summary': error_message,
+                },
+            }
+        )
+        return jsonify({'messages': _copy_history(), 'run_summary': error_message}), 200
 
-            ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
-            _append_history_message('assistant', ack_message)
+    if start_new_task:
+        if controller.is_running():
+            _append_history_message('user', prompt)
+            message = 'エージェント実行中は新しいタスクを開始できません。現在の実行が完了するまでお待ちください。'
+            _append_history_message('assistant', message)
             return (
                 jsonify(
                     {
                         'messages': _copy_history(),
-                        'run_summary': ack_message,
-                        'queued': True,
+                        'run_summary': message,
                         'agent_running': True,
                     }
                 ),
-                202,
+                409,
+            )
+        try:
+            controller.reset()
+        except AgentControllerError as exc:
+            _append_history_message('user', prompt)
+            message = f'新しいタスクを開始できませんでした: {exc}'
+            _append_history_message('assistant', message)
+            return jsonify({'messages': _copy_history(), 'run_summary': message}), 400
+        _reset_history()
+
+    _append_history_message('user', prompt)
+
+    if controller.is_running():
+        try:
+            controller.enqueue_follow_up(prompt)
+        except AgentControllerError as exc:
+            message = f'フォローアップの指示の適用に失敗しました: {exc}'
+            logger.warning(message)
+            _append_history_message('assistant', message)
+            return (
+                jsonify({'messages': _copy_history(), 'run_summary': message, 'queued': False}),
+                200,
             )
 
+        ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
+        _append_history_message('assistant', ack_message)
+        return (
+            jsonify(
+                {
+                    'messages': _copy_history(),
+                    'run_summary': ack_message,
+                    'queued': True,
+                    'agent_running': True,
+                }
+            ),
+            202,
+        )
+
+    try:
         run_result = controller.run(prompt)
         agent_history = run_result.filtered_history or run_result.history
     except AgentControllerError as exc:
