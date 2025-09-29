@@ -531,17 +531,25 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if session is None:
 			return
 
-		try:
-			session.event_bus = self.eventbus
-		except Exception:
-			logger.debug(
-				'Failed to synchronise browser session event bus with agent event bus',
-				exc_info=True,
-			)
-			return
+                try:
+                        session.event_bus = self.eventbus
+                except Exception:
+                        logger.debug(
+                                'Failed to synchronise browser session event bus with agent event bus',
+                                exc_info=True,
+                        )
+                        return
 
-		if not reset_watchdogs:
-			return
+                try:
+                        session.model_post_init(None)
+                except Exception:
+                        logger.debug(
+                                'Failed to re-register browser session event handlers on refreshed event bus',
+                                exc_info=True,
+                        )
+
+                if not reset_watchdogs:
+                        return
 
 		if hasattr(session, '_watchdogs_attached'):
 			try:
