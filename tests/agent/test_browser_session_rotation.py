@@ -8,6 +8,7 @@ import pytest
 from bubus import EventBus
 from bubus.service import QueueShutDown
 
+import flask_app.app as controller_module
 from flask_app.app import BrowserAgentController
 from browser_use.browser.events import BrowserStateRequestEvent
 from browser_use.browser.session import BrowserSession
@@ -109,6 +110,126 @@ async def test_browser_session_rotates_after_event_bus_shutdown(monkeypatch) -> 
         new_session = await controller._ensure_browser_session()
 
         assert new_session is not first_session
+    finally:
+        controller.shutdown()
+
+
+class _RecordingEventBus:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.stop_calls = 0
+
+    async def stop(self, **_: object) -> None:
+        self.stop_calls += 1
+
+    def publish(self, event: str) -> None:
+        self.events.append(event)
+
+
+class _LegacySession:
+    def __init__(self, *, browser_profile: _DummyProfile) -> None:
+        self.browser_profile = browser_profile
+        self.event_bus = controller_module.EventBus()
+        self.stop_calls = 0
+        self.model_post_init_calls = 0
+        self.reset_event_bus_calls = 0
+
+    async def attach_all_watchdogs(self) -> None:  # pragma: no cover - simple stub
+        await asyncio.sleep(0)
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        await asyncio.sleep(0)
+
+    def model_post_init(self, _: object) -> None:
+        self.model_post_init_calls += 1
+
+    def _reset_event_bus_state(self) -> None:
+        self.reset_event_bus_calls += 1
+        self.event_bus = controller_module.EventBus()
+
+
+class _RecordingAgent:
+    def __init__(
+        self,
+        *,
+        task: str,
+        browser_session: _LegacySession,
+        llm: object,
+        register_new_step_callback,
+        extend_system_message: str,
+    ) -> None:
+        self.task = task
+        self.browser_session = browser_session
+        self.llm = llm
+        self.register_new_step_callback = register_new_step_callback
+        self.extend_system_message = extend_system_message
+        self.initial_actions: list[object] | None = []
+        self.initial_url: str | None = None
+        self.state = SimpleNamespace(
+            last_result=[],
+            follow_up_task=False,
+            n_steps=1,
+            paused=False,
+            stopped=False,
+        )
+        self.history = SimpleNamespace(history=[], usage=None)
+        self.run_calls = 0
+        self._eventbus_history: list[_RecordingEventBus] = []
+        self._reset_eventbus_calls = 0
+        self._refresh_calls = 0
+        self._refresh_kwargs: dict[str, object] | None = None
+        self.eventbus = controller_module.EventBus()
+        self.browser_session.event_bus = self.eventbus
+        self._eventbus_history.append(self.eventbus)
+
+    def _convert_initial_actions(self, actions: list[object]) -> list[object]:
+        return actions
+
+    def add_new_task(self, task: str) -> None:
+        self.task = task
+
+    async def run(self, max_steps: int) -> SimpleNamespace:  # pragma: no cover - deterministic stub
+        self.run_calls += 1
+        self.eventbus.publish(f'run-{self.run_calls}')
+        return SimpleNamespace(history=[], usage=None)
+
+    def _reset_eventbus(self) -> None:
+        self._reset_eventbus_calls += 1
+        new_bus = controller_module.EventBus()
+        self.eventbus = new_bus
+        self.browser_session.event_bus = new_bus
+        self._eventbus_history.append(new_bus)
+
+    def _refresh_browser_session_eventbus(self, *, reset_watchdogs: bool = True) -> None:
+        self._refresh_calls += 1
+        self._refresh_kwargs = {'reset_watchdogs': reset_watchdogs}
+        self.browser_session.event_bus = self.eventbus
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_resynchronises_agent_event_bus(monkeypatch) -> None:
+    monkeypatch.setattr('flask_app.app._create_gemini_llm', lambda: object())
+    monkeypatch.setattr(controller_module, 'EventBus', _RecordingEventBus)
+    monkeypatch.setattr(controller_module, 'BrowserProfile', _DummyProfile)
+    monkeypatch.setattr(controller_module, 'BrowserSession', _LegacySession)
+    monkeypatch.setattr(controller_module, 'Agent', _RecordingAgent)
+
+    controller = BrowserAgentController(cdp_url='ws://example', max_steps=1)
+
+    try:
+        await controller._run_agent('first task')
+        agent = controller._agent
+        assert agent is not None
+        assert controller._browser_session is not None
+        assert controller._browser_session.reset_event_bus_calls == 1
+        assert agent.eventbus is agent.browser_session.event_bus
+        assert agent._reset_eventbus_calls >= 1
+        assert agent._eventbus_history[0].events == ['run-1']
+
+        await controller._run_agent('second task')
+        assert agent.eventbus is agent.browser_session.event_bus
+        assert 'run-2' in agent._eventbus_history[1].events
     finally:
         controller.shutdown()
 
