@@ -842,6 +842,35 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._reset_eventbus()
 		return True
 
+	def reset_completion_state(self) -> bool:
+		"""Clear completion flags so follow-up runs can execute new steps."""
+
+		cleared = False
+
+		def _clear_flag(results: list[ActionResult] | None) -> None:
+			nonlocal cleared
+			if not results:
+				return
+
+			try:
+				final_result = results[-1]
+			except IndexError:
+				return
+
+			if getattr(final_result, 'is_done', None):
+				final_result.is_done = False
+				if getattr(final_result, 'success', None) is not None:
+					final_result.success = None
+				cleared = True
+
+		_clear_flag(self.state.last_result)
+
+		history_items = getattr(self.history, 'history', None)
+		if history_items:
+			_clear_flag(getattr(history_items[-1], 'result', None))
+
+		return cleared
+
 	def add_new_task(self, new_task: str) -> None:
 		"""Add a new task to the agent, keeping the same task_id as tasks are continuous"""
 		# Simply delegate to message manager - no need for new task_id or events
@@ -850,6 +879,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._message_manager.add_new_task(new_task)
 		# Mark as follow-up task so we preserve state-specific behaviours like skipping initial actions
 		self.state.follow_up_task = True
+
+		self.reset_completion_state()
 
 		# Ensure follow-up runs never reuse the previous EventBus identifier.
 		identifier_changed = False
