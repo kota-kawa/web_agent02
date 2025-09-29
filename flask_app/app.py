@@ -1010,34 +1010,12 @@ class BrowserAgentController:
     def _prepare_agent_for_follow_up(self, agent: Agent, *, force_resume_navigation: bool = False) -> None:
         """Clear completion flags so follow-up runs can execute new steps."""
 
-        def _clear_done_flag(results: list[ActionResult] | None) -> bool:
-            if not results:
-                return False
-
-            try:
-                final_result = results[-1]
-            except IndexError:
-                return False
-
-            if getattr(final_result, 'is_done', None):
-                final_result.is_done = False
-                if getattr(final_result, 'success', None) is not None:
-                    final_result.success = None
-                return True
-
-            return False
-
         cleared = False
 
         with suppress(AttributeError):
-            cleared = _clear_done_flag(agent.state.last_result)
+            cleared = agent.reset_completion_state()
             agent.state.stopped = False
             agent.state.paused = False
-
-        history_items = getattr(agent, 'history', None)
-        if history_items is not None:
-            with suppress(AttributeError, IndexError):
-                cleared = _clear_done_flag(history_items.history[-1].result) or cleared
 
         if cleared:
             self._logger.debug('Cleared completion state for follow-up agent run.')
