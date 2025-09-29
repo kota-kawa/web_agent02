@@ -531,25 +531,25 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if session is None:
 			return
 
-                try:
-                        session.event_bus = self.eventbus
-                except Exception:
-                        logger.debug(
-                                'Failed to synchronise browser session event bus with agent event bus',
-                                exc_info=True,
-                        )
-                        return
+		try:
+			session.event_bus = self.eventbus
+		except Exception:
+			logger.debug(
+				'Failed to synchronise browser session event bus with agent event bus',
+				exc_info=True,
+			)
+			return
 
-                try:
-                        session.model_post_init(None)
-                except Exception:
-                        logger.debug(
-                                'Failed to re-register browser session event handlers on refreshed event bus',
-                                exc_info=True,
-                        )
+		try:
+			session.model_post_init(None)
+		except Exception:
+			logger.debug(
+				'Failed to re-register browser session event handlers on refreshed event bus',
+				exc_info=True,
+			)
 
-                if not reset_watchdogs:
-                        return
+		if not reset_watchdogs:
+			return
 
 		if hasattr(session, '_watchdogs_attached'):
 			try:
@@ -2336,6 +2336,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 	async def close(self):
 		"""Close all resources"""
+		eventbus_stop_timeout = 3.0
+
 		try:
 			# Only close browser if keep_alive is False (or not set)
 			if self.browser_session is not None:
@@ -2343,6 +2345,49 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 					# Kill the browser session - this dispatches BrowserStopEvent,
 					# stops the EventBus with clear=True, and recreates a fresh EventBus
 					await self.browser_session.kill()
+
+			eventbus = getattr(self, 'eventbus', None)
+			cleanup_tasks = getattr(self, '_eventbus_cleanup_tasks', None)
+
+			if eventbus is not None:
+				try:
+					await eventbus.stop(timeout=eventbus_stop_timeout)
+				except Exception:
+					self.logger.warning(
+						'Failed to stop EventBus %s cleanly',
+						getattr(eventbus, 'name', '<anonymous>'),
+						exc_info=True,
+					)
+
+			if cleanup_tasks is not None:
+				for task in list(cleanup_tasks):
+					try:
+						await asyncio.wait_for(asyncio.shield(task), timeout=eventbus_stop_timeout)
+					except Exception:
+						task_name = task.get_name() if hasattr(task, 'get_name') else repr(task)
+						self.logger.warning(
+							'EventBus cleanup task %s did not finish cleanly',
+							task_name,
+							exc_info=True,
+						)
+					finally:
+						cleanup_tasks.discard(task)
+				cleanup_tasks.clear()
+
+			reserved_name = getattr(self, '_reserved_eventbus_name', None)
+			if reserved_name:
+				try:
+					EventBusFactory.release(reserved_name)
+				except Exception:
+					self.logger.warning(
+						'Failed to release EventBus name %s',
+						reserved_name,
+						exc_info=True,
+					)
+				finally:
+					self._reserved_eventbus_name = None
+			else:
+				self._reserved_eventbus_name = None
 
 			# Force garbage collection
 			gc.collect()
