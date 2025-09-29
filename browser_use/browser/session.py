@@ -43,6 +43,32 @@ from browser_use.dom.views import EnhancedDOMTreeNode, TargetInfo
 from browser_use.observability import observe_debug
 from browser_use.utils import _log_pretty_url, is_new_tab_page
 
+async def ensure_browser_state_handler_registered(session: 'BrowserSession') -> None:
+	handlers = session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, []) or []
+	has_callable_handler = any(callable(handler) for handler in handlers)
+
+	if has_callable_handler:
+		return
+
+	session.logger.debug(
+		'BrowserStateRequestEvent handler missing; attaching watchdogs before requesting state summary.'
+	)
+
+	if hasattr(session, '_watchdogs_attached') and getattr(session, '_watchdogs_attached'):
+		session._watchdogs_attached = False  # type: ignore[attr-defined]
+
+	await session.attach_all_watchdogs()
+
+	handlers = session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, []) or []
+	has_callable_handler = any(callable(handler) for handler in handlers)
+
+	if not has_callable_handler:
+		session.logger.warning(
+			'BrowserStateRequestEvent handler still missing after reattaching watchdogs; continuing to dispatch for retry path.'
+	)
+
+
+
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
 
 _LOGGED_UNIQUE_SESSION_IDS = set()  # track unique session IDs that have been logged to make sure we always assign a unique enough id to new sessions and avoid ambiguity in logs
@@ -996,6 +1022,7 @@ class BrowserSession(BaseModel):
 
 		last_error: Exception | None = None
 		for attempt in range(2):
+			await ensure_browser_state_handler_registered(self)
 			# Dispatch the event and wait for result
 			event: BrowserStateRequestEvent = cast(
 				BrowserStateRequestEvent,
