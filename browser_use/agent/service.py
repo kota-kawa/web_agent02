@@ -540,13 +540,75 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			)
 			return
 
+		fallback_triggered = False
+
 		try:
 			session.model_post_init(None)
-		except Exception:
-			logger.debug(
-				'Failed to re-register browser session event handlers on refreshed event bus',
+		except Exception as exc:
+			logger.warning(
+				'Failed to re-register browser session event handlers on refreshed event bus: %s. '
+				'Attempting to rotate the event bus and retry once.',
+				exc,
 				exc_info=True,
 			)
+
+			previous_bus = getattr(self, 'eventbus', None)
+			previous_name = getattr(self, '_reserved_eventbus_name', None)
+
+			rotated_bus = False
+
+			try:
+				new_bus, new_name = self._create_eventbus(force_random=True)
+			except Exception:  # pragma: no cover - defensive logging
+				logger.exception('Failed to create fallback EventBus during browser session refresh')
+				new_bus, new_name = None, None
+
+			if new_bus is not None:
+				self.eventbus = new_bus
+				self._reserved_eventbus_name = new_name
+				try:
+					session.event_bus = new_bus
+				except Exception:
+					logger.exception('Failed to assign rotated EventBus to browser session')
+				else:
+					rotated_bus = True
+					if previous_name:
+						EventBusFactory.release(previous_name)
+					if previous_bus is not None and previous_bus is not new_bus:
+						self._schedule_eventbus_stop(previous_bus)
+
+			if not rotated_bus:
+				try:
+					self.eventbus.handlers.clear()
+				except Exception:
+					logger.exception('Failed to clear handlers on browser session EventBus during fallback')
+				else:
+					rotated_bus = True
+
+			if rotated_bus and getattr(self, 'cloud_sync', None) and getattr(self, 'enable_cloud_sync', False):
+				try:
+					self.eventbus.on('*', self.cloud_sync.handle_event)
+				except Exception:
+					logger.exception('Failed to re-register cloud sync handler on rotated EventBus')
+
+			fallback_triggered = rotated_bus
+
+			try:
+				session.model_post_init(None)
+			except Exception as second_exc:
+				logger.warning(
+					'Second attempt to register browser session event handlers failed: %s',
+					second_exc,
+					exc_info=True,
+				)
+				raise
+
+		if fallback_triggered:
+			start_handlers = session.event_bus.handlers.get('BrowserStartEvent', [])
+			if not start_handlers:
+				raise RuntimeError(
+					'Browser session EventBus has no BrowserStartEvent handlers after fallback rotation'
+				)
 
 		if not reset_watchdogs:
 			return
