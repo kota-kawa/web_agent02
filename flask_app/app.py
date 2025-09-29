@@ -881,10 +881,52 @@ class BrowserAgentController:
                     )
                     with suppress(Exception):
                         await session.event_bus.stop(clear=True, timeout=1.0)
+
+                    def _resync_agent_event_bus() -> None:
+                        with self._state_lock:
+                            candidate = self._agent or self._current_agent
+                        if candidate is None:
+                            return
+                        if getattr(candidate, 'browser_session', None) is not session:
+                            return
+
+                        reset_agent_bus = getattr(candidate, '_reset_eventbus', None)
+                        if callable(reset_agent_bus):
+                            try:
+                                reset_agent_bus()
+                            except Exception:  # noqa: BLE001
+                                self._logger.warning(
+                                    'Failed to reset agent event bus after legacy session refresh; attempting manual synchronisation.',
+                                    exc_info=True,
+                                )
+                            else:
+                                return
+
+                        refresh_agent_bus = getattr(
+                            candidate,
+                            '_refresh_browser_session_eventbus',
+                            None,
+                        )
+                        if callable(refresh_agent_bus):
+                            try:
+                                refresh_agent_bus(reset_watchdogs=True)
+                            except Exception:  # noqa: BLE001
+                                self._logger.warning(
+                                    'Failed to refresh agent event bus after legacy session refresh.',
+                                    exc_info=True,
+                                )
+
                     reset_method = getattr(session, '_reset_event_bus_state', None)
                     if callable(reset_method):
-                        with suppress(Exception):
+                        try:
                             reset_method()
+                        except Exception:  # noqa: BLE001
+                            self._logger.debug(
+                                'Legacy browser session failed to reset event bus state cleanly.',
+                                exc_info=True,
+                            )
+                        else:
+                            _resync_agent_event_bus()
                     else:
                         self._logger.debug(
                             'Legacy browser session missing _reset_event_bus_state(); refreshing EventBus manually.',
@@ -898,6 +940,8 @@ class BrowserAgentController:
                                 'Failed to refresh EventBus on legacy browser session; scheduling full rotation.',
                                 exc_info=True,
                             )
+                        else:
+                            _resync_agent_event_bus()
             else:
                 with suppress(Exception):
                     await session.stop()
