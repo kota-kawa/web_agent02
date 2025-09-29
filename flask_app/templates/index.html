@@ -72,6 +72,14 @@
             </button>
           </div>
           <div class="prompt-footer">
+            <button
+              type="button"
+              id="new-task-button"
+              class="new-task-button"
+              aria-label="新しいタスクとして送信"
+            >
+              新しいタスクとして送信
+            </button>
             <span class="hint">Ctrl / ⌘ + Enterで送信</span>
           </div>
         </form>
@@ -103,6 +111,7 @@
       const promptInput = document.getElementById('prompt-input');
       const pauseButton = document.getElementById('pause-button');
       const resetButton = document.getElementById('reset-button');
+      const newTaskButton = document.getElementById('new-task-button');
       const quickPrompts = document.querySelectorAll('[data-prompt]');
       const connectionIndicator = document.getElementById('connection-indicator');
 
@@ -111,6 +120,7 @@
       let isRunning = false;
       let isPaused = false;
       let statusClearTimer;
+      let pendingSubmitMode = 'continue';
 
       function setStatus(message, variant = 'info') {
         if (!statusElement) {
@@ -255,15 +265,18 @@
       }
 
       function updatePauseButtonState() {
-        if (!pauseButton) {
-          return;
+        if (pauseButton) {
+          if (!isRunning) {
+            pauseButton.disabled = true;
+            pauseButton.textContent = '一時停止';
+          } else {
+            pauseButton.disabled = false;
+            pauseButton.textContent = isPaused ? '再開' : '一時停止';
+          }
         }
-        if (!isRunning) {
-          pauseButton.disabled = true;
-          pauseButton.textContent = '一時停止';
-        } else {
-          pauseButton.disabled = false;
-          pauseButton.textContent = isPaused ? '再開' : '一時停止';
+        if (newTaskButton) {
+          const sending = formElement.classList.contains('is-sending');
+          newTaskButton.disabled = isRunning || sending;
         }
       }
 
@@ -335,6 +348,9 @@
 
       formElement.addEventListener('submit', async (event) => {
         event.preventDefault();
+        const mode = pendingSubmitMode;
+        pendingSubmitMode = 'continue';
+        const isNewTaskSubmission = mode === 'new-task';
         const rawPrompt = promptInput.value;
         const prompt = rawPrompt.trim();
         if (!prompt) {
@@ -344,7 +360,12 @@
 
         const submittedPromptValue = rawPrompt;
         formElement.classList.add('is-sending');
-        setStatus('エージェントに指示を送信しています…', 'progress');
+        setStatus(
+          isNewTaskSubmission
+            ? '新しいタスクとしてエージェントに指示を送信しています…'
+            : 'エージェントに指示を送信しています…',
+          'progress',
+        );
         setMessagesBusy(true);
         isRunning = true;
         isPaused = false;
@@ -356,12 +377,17 @@
         let shouldContinueRunning = false;
 
         try {
+          if (newTaskButton) {
+            newTaskButton.disabled = true;
+          }
           const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ prompt }),
+            body: JSON.stringify(
+              isNewTaskSubmission ? { prompt, new_task: true } : { prompt },
+            ),
           });
 
           const data = await response.json().catch(() => ({}));
@@ -425,6 +451,25 @@
             setStatus(error.message || '操作に失敗しました。', 'error');
           } finally {
             updatePauseButtonState();
+          }
+        });
+      }
+
+      if (newTaskButton) {
+        newTaskButton.addEventListener('click', () => {
+          if (newTaskButton.disabled) {
+            return;
+          }
+          if (!promptInput.value.trim()) {
+            setStatus('新しいタスクの指示を入力してください。', 'warning');
+            promptInput.focus();
+            return;
+          }
+          pendingSubmitMode = 'new-task';
+          if (typeof formElement.requestSubmit === 'function') {
+            formElement.requestSubmit();
+          } else {
+            formElement.submit();
           }
         });
       }
