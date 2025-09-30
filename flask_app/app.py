@@ -765,16 +765,17 @@ class BrowserAgentController:
                 register_new_step_callback=handle_new_step,
                 extend_system_message=_LANGUAGE_EXTENSION,
             )
-            if _DEFAULT_START_URL and not fresh_agent.initial_actions:
+            start_url = self._get_resume_url() or _DEFAULT_START_URL
+            if start_url and not fresh_agent.initial_actions:
                 try:
-                    fresh_agent.initial_url = _DEFAULT_START_URL
+                    fresh_agent.initial_url = start_url
                     fresh_agent.initial_actions = fresh_agent._convert_initial_actions(
-                        [{'go_to_url': {'url': _DEFAULT_START_URL, 'new_tab': False}}]
+                        [{'go_to_url': {'url': start_url, 'new_tab': False}}]
                     )
                 except Exception:  # noqa: BLE001
                     self._logger.debug(
-                        'Failed to apply default start URL %s',
-                        _DEFAULT_START_URL,
+                        'Failed to apply start URL %s',
+                        start_url,
                         exc_info=True,
                     )
             return fresh_agent
@@ -1212,6 +1213,15 @@ class BrowserAgentController:
         self._set_resume_url(None)
         self._clear_step_message_ids()
 
+    def prepare_for_new_task(self) -> None:
+        with self._state_lock:
+            if self._is_running:
+                raise AgentControllerError('エージェント実行中は新しいタスクを開始できません。')
+            self._agent = None
+            self._current_agent = None
+            self._paused = False
+        self._clear_step_message_ids()
+
     def run(self, task: str) -> AgentRunResult:
         if self._shutdown:
             raise AgentControllerError('エージェントコントローラーは停止済みです。')
@@ -1376,13 +1386,12 @@ def chat() -> ResponseReturnValue:
                 409,
             )
         try:
-            controller.reset()
+            controller.prepare_for_new_task()
         except AgentControllerError as exc:
             _append_history_message('user', prompt)
             message = f'新しいタスクを開始できませんでした: {exc}'
             _append_history_message('assistant', message)
             return jsonify({'messages': _copy_history(), 'run_summary': message}), 400
-        _reset_history()
 
     _append_history_message('user', prompt)
 
