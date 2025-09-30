@@ -976,11 +976,37 @@ class BrowserAgentController:
                 self._is_running = False
                 self._paused = False
 
-    async def _async_shutdown(self) -> None:
-        if self._browser_session is not None:
-            with suppress(Exception):
-                await self._browser_session.stop()
+    def _pop_browser_session(self) -> BrowserSession | None:
+        with self._state_lock:
+            session = self._browser_session
             self._browser_session = None
+            self._session_recreated = False
+        return session
+
+    def _stop_browser_session(self) -> None:
+        session = self._pop_browser_session()
+        if session is None:
+            return
+
+        async def _shutdown() -> None:
+            with suppress(Exception):
+                await session.stop()
+
+        future = asyncio.run_coroutine_threadsafe(_shutdown(), self._loop)
+        try:
+            future.result(timeout=5)
+        except Exception:  # noqa: BLE001
+            future.cancel()
+            self._logger.warning(
+                'Failed to stop browser session cleanly; a fresh session will be created on the next run.',
+                exc_info=True,
+            )
+
+    async def _async_shutdown(self) -> None:
+        session = self._pop_browser_session()
+        if session is not None:
+            with suppress(Exception):
+                await session.stop()
 
     def _call_in_loop(self, func: Callable[[], None]) -> None:
         async def _invoke() -> None:
@@ -1149,6 +1175,8 @@ class BrowserAgentController:
         with self._state_lock:
             if self._is_running:
                 raise AgentControllerError('エージェント実行中はリセットできません。')
+        self._stop_browser_session()
+        with self._state_lock:
             self._agent = None
             self._current_agent = None
             self._paused = False
