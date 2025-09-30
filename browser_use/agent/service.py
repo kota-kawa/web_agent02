@@ -923,6 +923,20 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				final_result.is_done = False
 				if getattr(final_result, 'success', None) is not None:
 					final_result.success = None
+				if hasattr(final_result, 'error'):
+					final_result.error = None
+				if hasattr(final_result, 'long_term_memory'):
+					final_result.long_term_memory = None
+				if hasattr(final_result, 'extracted_content'):
+					final_result.extracted_content = None
+				if hasattr(final_result, 'metadata'):
+					final_result.metadata = None
+				if hasattr(final_result, 'attachments'):
+					final_result.attachments = []
+				if hasattr(final_result, 'include_extracted_content_only_once'):
+					final_result.include_extracted_content_only_once = False
+				if hasattr(final_result, 'include_in_memory'):
+					final_result.include_in_memory = False
 				cleared = True
 
 		_clear_flag(self.state.last_result)

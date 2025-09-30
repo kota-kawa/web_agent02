@@ -140,3 +140,90 @@ async def test_follow_up_run_resets_done_flags_and_executes_steps():
         assert agent.state.last_result[-1].error == 'boom'
     finally:
         CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync
+
+
+def test_add_new_task_clears_user_payloads_across_runs():
+    original_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
+    CONFIG.BROWSER_USE_CLOUD_SYNC = False
+
+    try:
+        agent = Agent(
+            task='initial task',
+            llm=DummyLLM(),
+            browser_session=StubBrowserSession(),
+            calculate_cost=False,
+            directly_open_url=False,
+        )
+
+        first_result = [
+            ActionResult(
+                is_done=True,
+                success=True,
+                extracted_content='first run content',
+                long_term_memory='memory',
+                attachments=['file.txt'],
+                error='boom',
+                metadata={'source': 'first'},
+                include_extracted_content_only_once=True,
+                include_in_memory=True,
+            )
+        ]
+
+        agent.state.last_result = first_result
+        agent.history.add_item(
+            AgentHistory(
+                model_output=None,
+                result=first_result,
+                state=_history_state(),
+                metadata=None,
+            )
+        )
+
+        agent.add_new_task('follow-up 1')
+
+        cleared_result = agent.state.last_result[-1]
+        assert cleared_result.extracted_content is None
+        assert cleared_result.long_term_memory is None
+        assert cleared_result.attachments == []
+        assert cleared_result.error is None
+        assert cleared_result.metadata is None
+        assert cleared_result.include_extracted_content_only_once is False
+        assert cleared_result.include_in_memory is False
+
+        history_result = agent.history.history[-1].result[-1]
+        assert history_result.extracted_content is None
+        assert history_result.long_term_memory is None
+        assert history_result.attachments == []
+        assert history_result.error is None
+        assert history_result.metadata is None
+
+        second_result = [
+            ActionResult(
+                is_done=True,
+                success=True,
+                extracted_content='second run content',
+                attachments=['second.txt'],
+            )
+        ]
+
+        agent.state.last_result = second_result
+        agent.history.add_item(
+            AgentHistory(
+                model_output=None,
+                result=second_result,
+                state=_history_state(),
+                metadata=None,
+            )
+        )
+
+        agent.add_new_task('follow-up 2')
+
+        cleared_second_result = agent.state.last_result[-1]
+        assert cleared_second_result.extracted_content is None
+        assert cleared_second_result.attachments == []
+
+        second_history_result = agent.history.history[-1].result[-1]
+        assert second_history_result.extracted_content is None
+        assert second_history_result.attachments == []
+    finally:
+        CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync
