@@ -37,6 +37,8 @@ class SessionTestDouble(BrowserSession):
                 async def _handler(event: BrowserStateRequestEvent) -> BrowserStateSummary:
                         return self._summary
 
+                _handler.__name__ = 'DOMWatchdog.on_BrowserStateRequestEvent'
+
                 self.event_bus.on(BrowserStateRequestEvent, _handler)
                 object.__setattr__(self, '_last_handler', _handler)
                 self._watchdogs_attached = True
@@ -82,3 +84,25 @@ def test_browser_state_summary_recovers_missing_handler_between_runs():
         assert handlers and handlers[0] is session._last_handler
         assert session._last_handler is not first_handler
         assert session._watchdogs_attached is True
+
+
+def test_browser_state_summary_rebinds_when_handler_returns_none():
+        session = SessionTestDouble()
+
+        async def stale_handler(event: BrowserStateRequestEvent):
+                return None
+
+        stale_handler.__name__ = 'StaleHandler'
+
+        session.event_bus.handlers[BrowserStateRequestEvent.__name__] = [stale_handler]
+        session._watchdogs_attached = True
+
+        _run(ensure_browser_state_handler_registered(session))
+
+        assert session._attach_invocations == 1
+        handlers = session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, [])
+        assert handlers and handlers[0] is session._last_handler
+        assert session._watchdogs_attached is True
+
+        summary = _run(handlers[0](BrowserStateRequestEvent()))
+        assert summary is session._summary

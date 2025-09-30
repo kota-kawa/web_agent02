@@ -44,28 +44,42 @@ from browser_use.observability import observe_debug
 from browser_use.utils import _log_pretty_url, is_new_tab_page
 
 async def ensure_browser_state_handler_registered(session: 'BrowserSession') -> None:
-	handlers = session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, []) or []
-	has_callable_handler = any(callable(handler) for handler in handlers)
+    """Ensure the DOM watchdog handler that yields BrowserStateSummary is registered."""
 
-	if has_callable_handler:
-		return
+    def _get_handlers() -> list[Any]:
+        return session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, []) or []
 
-	session.logger.debug(
-		'BrowserStateRequestEvent handler missing; attaching watchdogs before requesting state summary.'
-	)
+    def _has_summary_handler(handlers: list[Any]) -> bool:
+        for handler in handlers:
+            name = getattr(handler, '__name__', '')
+            if 'DOMWatchdog.on_BrowserStateRequestEvent' in name:
+                return True
+            watchdog_instance = getattr(handler, '__self__', None)
+            if getattr(getattr(watchdog_instance, '__class__', None), '__name__', None) == 'DOMWatchdog':
+                return True
+        return False
 
-	if hasattr(session, '_watchdogs_attached') and getattr(session, '_watchdogs_attached'):
-		session._watchdogs_attached = False  # type: ignore[attr-defined]
+    handlers = _get_handlers()
+    if _has_summary_handler(handlers):
+        return
 
-	await session.attach_all_watchdogs()
+    session.logger.debug(
+        'BrowserStateRequestEvent handler missing; attaching watchdogs before requesting state summary.'
+    )
 
-	handlers = session.event_bus.handlers.get(BrowserStateRequestEvent.__name__, []) or []
-	has_callable_handler = any(callable(handler) for handler in handlers)
+    # Clear any stale handlers so watchdog reattachment can register a fresh DOM handler
+    session.event_bus.handlers.pop(BrowserStateRequestEvent.__name__, None)
 
-	if not has_callable_handler:
-		session.logger.warning(
-			'BrowserStateRequestEvent handler still missing after reattaching watchdogs; continuing to dispatch for retry path.'
-	)
+    if getattr(session, '_watchdogs_attached', False):
+        session._watchdogs_attached = False  # type: ignore[attr-defined]
+
+    await session.attach_all_watchdogs()
+
+    handlers = _get_handlers()
+    if not _has_summary_handler(handlers):
+        session.logger.warning(
+            'BrowserStateRequestEvent handler still missing after reattaching watchdogs; continuing to dispatch for retry path.'
+        )
 
 
 
