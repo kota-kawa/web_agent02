@@ -227,3 +227,36 @@ def test_add_new_task_clears_user_payloads_across_runs():
         assert second_history_result.attachments == []
     finally:
         CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync
+
+
+def test_add_new_task_rotates_legacy_eventbus_while_running():
+    original_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
+    CONFIG.BROWSER_USE_CLOUD_SYNC = False
+
+    try:
+        agent = Agent(
+            task='initial task',
+            llm=DummyLLM(),
+            browser_session=StubBrowserSession(),
+            calculate_cost=False,
+            directly_open_url=False,
+        )
+
+        class LegacyEventBus:
+            def __init__(self) -> None:
+                self.name = 'Agent_000-legacy'
+                self.handlers: dict[str, list] = {}
+                self.stop_calls = 0
+
+            async def stop(self, *, timeout: float = 3.0) -> None:  # noqa: ARG002
+                self.stop_calls += 1
+
+        agent.eventbus = LegacyEventBus()
+        agent._reserved_eventbus_name = 'Agent_000-legacy'
+        agent.running = True
+
+        agent.add_new_task('follow-up instructions')
+
+        assert agent.eventbus.name != 'Agent_000-legacy'
+    finally:
+        CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync
