@@ -933,6 +933,35 @@ class BrowserAgentController:
                         )
                         try:
                             session.event_bus = EventBus()
+                            try:
+                                session._watchdogs_attached = False  # type: ignore[attr-defined]
+                            except Exception:  # noqa: BLE001
+                                self._logger.debug(
+                                    'Unable to reset watchdog attachment flag during manual event bus refresh.',
+                                    exc_info=True,
+                                )
+                            for attribute in (
+                                '_crash_watchdog',
+                                '_downloads_watchdog',
+                                '_aboutblank_watchdog',
+                                '_security_watchdog',
+                                '_storage_state_watchdog',
+                                '_local_browser_watchdog',
+                                '_default_action_watchdog',
+                                '_dom_watchdog',
+                                '_screenshot_watchdog',
+                                '_permissions_watchdog',
+                                '_recording_watchdog',
+                            ):
+                                if hasattr(session, attribute):
+                                    try:
+                                        setattr(session, attribute, None)
+                                    except Exception:  # noqa: BLE001
+                                        self._logger.debug(
+                                            'Unable to clear %s during manual event bus refresh.',
+                                            attribute,
+                                            exc_info=True,
+                                        )
                             session.model_post_init(None)
                         except Exception:  # noqa: BLE001
                             rotate_session = True
