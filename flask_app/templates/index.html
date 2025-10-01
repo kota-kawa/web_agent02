@@ -11,6 +11,16 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
     />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <script
+      src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+      integrity="sha384-k5I0tyZtwT+mToj8tX7iSSg9hr/0BNPkYZ6nSjkK2jHcD8+0WnYQaFzaiKem7hP3"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"
+      integrity="sha384-sXwD19AFsEuS8FeFf3vvHtZ/4o2oVd3DqCTQ3ng2hGc+uI+wFdhoJVdNG5Z7K61o"
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body>
     <main class="layout">
@@ -188,6 +198,29 @@
       setConnectionState('idle');
       updateEmptyState();
 
+      function renderMessageContent(element, content) {
+        if (!element) {
+          return;
+        }
+        const text = typeof content === 'string' ? content : '';
+        if (window.marked) {
+          const markedOptions = {
+            breaks: true,
+            gfm: true,
+          };
+          const parsed = window.marked.parse(text, markedOptions);
+          if (window.DOMPurify) {
+            element.innerHTML = window.DOMPurify.sanitize(parsed, {
+              USE_PROFILES: { html: true },
+            });
+          } else {
+            element.innerHTML = parsed;
+          }
+        } else {
+          element.textContent = text;
+        }
+      }
+
       function createMessageElement(message) {
         const wrapper = document.createElement('div');
         wrapper.className = `message ${message.role}`;
@@ -200,7 +233,7 @@
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.textContent = message.content;
+        renderMessageContent(bubble, message.content);
         wrapper.appendChild(bubble);
 
         const meta = document.createElement('div');
@@ -220,7 +253,7 @@
       function updateMessageElement(element, message) {
         const bubble = element.querySelector('.bubble');
         if (bubble) {
-          bubble.textContent = message.content;
+          renderMessageContent(bubble, message.content);
         }
         const meta = element.querySelector('.meta');
         if (meta) {

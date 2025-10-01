@@ -427,10 +427,57 @@ button:not(:disabled) {
 }
 
 .message .bubble {
-  white-space: pre-wrap;
   line-height: 1.6;
   font-size: 0.94rem;
   color: inherit;
+  word-break: break-word;
+}
+
+.message .bubble p {
+  margin: 0 0 0.75em;
+}
+
+.message .bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.message .bubble ul,
+.message .bubble ol {
+  margin: 0.25em 0 0.75em 1.2em;
+  padding-left: 1.1em;
+}
+
+.message .bubble li {
+  margin-bottom: 0.35em;
+}
+
+.message .bubble li:last-child {
+  margin-bottom: 0;
+}
+
+.message .bubble pre {
+  margin: 0.5em 0;
+  padding: 0.75em;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow-x: auto;
+}
+
+.message .bubble code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.message .bubble :where(h1, h2, h3, h4, h5, h6) {
+  margin: 0.8em 0 0.5em;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.message .bubble :where(h1, h2, h3) {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.4);
+  padding-bottom: 0.2em;
 }
 
 .message .meta {
