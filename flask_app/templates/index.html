@@ -221,31 +221,75 @@
         }
       }
 
+      function formatTimestamp(timestamp) {
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) {
+          return { text: '', iso: '' };
+        }
+        return {
+          iso: date.toISOString(),
+          text: date.toLocaleString('ja-JP', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        };
+      }
+
+      function applyTimestamp(element, timestamp) {
+        if (!element) {
+          return;
+        }
+        const formatted = formatTimestamp(timestamp);
+        element.textContent = formatted.text;
+        if (formatted.iso) {
+          element.dateTime = formatted.iso;
+        } else {
+          element.removeAttribute('datetime');
+        }
+      }
+
       function createMessageElement(message) {
-        const wrapper = document.createElement('div');
+        const wrapper = document.createElement('article');
         wrapper.className = `message ${message.role}`;
         wrapper.dataset.id = message.id;
 
-        const label = document.createElement('div');
-        label.className = 'label';
-        label.textContent = message.role === 'assistant' ? 'LLM' : 'ユーザー';
-        wrapper.appendChild(label);
+        const header = document.createElement('header');
+        header.className = 'message__header';
+
+        const title = document.createElement('div');
+        title.className = 'message__title';
+
+        const avatar = document.createElement('span');
+        avatar.className = 'message__avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = message.role === 'assistant' ? '🤖' : '🧑';
+        title.appendChild(avatar);
+
+        const badge = document.createElement('span');
+        badge.className = 'message__badge';
+        badge.textContent = message.role === 'assistant' ? 'LLM' : 'ユーザー';
+        title.appendChild(badge);
+
+        header.appendChild(title);
+
+        const timestamp = document.createElement('time');
+        timestamp.className = 'message__timestamp';
+        applyTimestamp(timestamp, message.timestamp);
+        header.appendChild(timestamp);
+
+        wrapper.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'message__body';
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
         renderMessageContent(bubble, message.content);
-        wrapper.appendChild(bubble);
+        body.appendChild(bubble);
 
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        const timestamp = new Date(message.timestamp);
-        if (!Number.isNaN(timestamp.getTime())) {
-          meta.textContent = timestamp.toLocaleTimeString('ja-JP', {
-            hour: '2-digit',
-            minute: '2-digit',
-          });
-        }
-        wrapper.appendChild(meta);
+        wrapper.appendChild(body);
 
         return wrapper;
       }
@@ -255,16 +299,8 @@
         if (bubble) {
           renderMessageContent(bubble, message.content);
         }
-        const meta = element.querySelector('.meta');
-        if (meta) {
-          const timestamp = new Date(message.timestamp);
-          if (!Number.isNaN(timestamp.getTime())) {
-            meta.textContent = timestamp.toLocaleTimeString('ja-JP', {
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-          }
-        }
+        const timestamp = element.querySelector('.message__timestamp');
+        applyTimestamp(timestamp, message.timestamp);
       }
 
       function renderMessages(messages) {
