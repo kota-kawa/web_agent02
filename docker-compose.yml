@@ -12,6 +12,9 @@ services:
       - GEMINI_API_KEY=AIzaSyAeLbzEtn0vF6XBAAiD6gTHDNpvpHqKnoE
     depends_on:
       - browser
+    networks:
+      - default
+      - multi_agent_network
 
   browser:
     image: selenium/standalone-chrome:latest
@@ -27,3 +30,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    networks:
+      - default
+      - multi_agent_network
+
+networks:
+  multi_agent_network:
+    external: true
+    name: ${MULTI_AGENT_NETWORK:-multi_agent_platform_net}
