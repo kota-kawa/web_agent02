@@ -218,7 +218,7 @@ def _reset_history() -> list[dict[str, str | int]]:
 
 _BROWSER_URL = os.environ.get(
     'EMBED_BROWSER_URL',
-    'http://127.0.0.1:7900/?autoconnect=1&resize=scale',
+    'http://127.0.0.1:7900/?autoconnect=1&resize=remote',
 )
 
 
