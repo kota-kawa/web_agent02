@@ -16,6 +16,7 @@ from datetime import datetime
 from itertools import count
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -216,9 +217,44 @@ def _reset_history() -> list[dict[str, str | int]]:
     _broadcaster.publish_reset()
     return snapshot
 
-_BROWSER_URL = os.environ.get(
-    'EMBED_BROWSER_URL',
-    'http://127.0.0.1:7900/?autoconnect=1&resize=remote',
+_DEFAULT_EMBED_BROWSER_URL = 'http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto'
+_ALLOWED_RESIZE_VALUES = {'scale', 'remote', 'off'}
+
+
+def _normalize_embed_browser_url(value: str) -> str:
+    """Ensure the embedded noVNC URL fills the container on first load."""
+
+    if not value:
+        return value
+
+    parsed = urlparse(value)
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+
+    has_scale = any(key == 'scale' for key, _ in query_items)
+    if not has_scale:
+        query_items.append(('scale', 'auto'))
+
+    normalized_items: list[tuple[str, str]] = []
+    resize_present = False
+    for key, value in query_items:
+        if key == 'resize':
+            resize_present = True
+            if value not in _ALLOWED_RESIZE_VALUES:
+                normalized_items.append(('resize', 'scale'))
+            else:
+                normalized_items.append((key, value))
+        else:
+            normalized_items.append((key, value))
+
+    if not resize_present:
+        normalized_items.append(('resize', 'scale'))
+
+    normalized_query = urlencode(normalized_items)
+    return urlunparse(parsed._replace(query=normalized_query))
+
+
+_BROWSER_URL = _normalize_embed_browser_url(
+    os.environ.get('EMBED_BROWSER_URL', _DEFAULT_EMBED_BROWSER_URL)
 )
 
 
