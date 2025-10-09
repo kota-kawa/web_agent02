@@ -25,6 +25,7 @@ from flask.typing import ResponseReturnValue
 from bubus import EventBus
 
 from browser_use import Agent, BrowserProfile, BrowserSession
+from browser_use.browser.profile import ViewportSize
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.llm.google.chat import ChatGoogle
@@ -748,11 +749,17 @@ class BrowserAgentController:
                 'Chrome DevToolsのCDP URLが検出できませんでした。BROWSER_USE_CDP_URL を設定してください。'
             )
 
+        window_width = _env_int('BROWSER_WINDOW_WIDTH', 1920)
+        window_height = _env_int('BROWSER_WINDOW_HEIGHT', 1080)
+        window_size = ViewportSize(width=window_width, height=window_height)
+
         profile = BrowserProfile(
             cdp_url=self._cdp_url,
             keep_alive=True,
             highlight_elements=True,
             wait_between_actions=0.4,
+            window_size=window_size,
+            screen=window_size,
         )
         session = BrowserSession(browser_profile=profile)
         with self._state_lock:

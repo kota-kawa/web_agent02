@@ -90,6 +90,7 @@ Once the stack is up you can:
 
 * place your API keys in a local `.env` file consumed by the Flask service;
 * set `BROWSER_USE_CDP_URL` when the CDP endpoint cannot be discovered automatically;
+* adjust `BROWSER_WINDOW_WIDTH` / `BROWSER_WINDOW_HEIGHT` if you want the embedded Chrome window to launch maximized to a specific resolution (defaults to `1920x1080`).
 * adjust `AGENT_MAX_STEPS` to control how many reasoning steps the agent may take for each instruction.
 
 # Demos
