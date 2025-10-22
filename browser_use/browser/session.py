@@ -1372,37 +1372,97 @@ class BrowserSession(BaseModel):
 
 		return self
 
-	async def _apply_initial_window_state(self, target_id: TargetID | None) -> None:
-		"""Request fullscreen bounds for the first window when running headful."""
+        async def _apply_initial_window_state(self, target_id: TargetID | None) -> None:
+                """Request fullscreen bounds for the first window when running headful."""
 
-		if self.browser_profile.headless:
-			return
+                if self.browser_profile.headless:
+                        return
 
-		if self._fullscreen_requested:
-			return
+                if self._fullscreen_requested:
+                        return
 
-		if not target_id or not self._cdp_client_root:
-			return
+                if not target_id or not self._cdp_client_root:
+                        return
 
-		try:
-				window_info = await self._cdp_client_root.send.Browser.getWindowForTarget(
-					params={'targetId': target_id}
-				)
-				window_id = window_info.get('windowId') or window_info.get('window_id')
-				if window_id is None:
-					return
+                window_id: int | None = None
+                try:
+                        window_info = await self._cdp_client_root.send.Browser.getWindowForTarget(
+                                params={'targetId': target_id}
+                        )
+                        window_id = window_info.get('windowId') or window_info.get('window_id')
+                except Exception as e:
+                        self.logger.debug(
+                                'Unable to resolve window for fullscreen request: %s: %s',
+                                type(e).__name__,
+                                e,
+                        )
+                        return
 
-				await self._cdp_client_root.send.Browser.setWindowBounds(
-					params={'windowId': window_id, 'bounds': {'windowState': 'fullscreen'}}
-				)
-				self._fullscreen_requested = True
-				self.logger.debug('Requested fullscreen window state via CDP')
-		except Exception as e:
-				self.logger.debug(
-					'Unable to request fullscreen window state: %s: %s',
-					type(e).__name__,
-					e,
-				)
+                if window_id is None:
+                        return
+
+                fullscreen_state: str | None = None
+                try:
+                        await self._cdp_client_root.send.Browser.setWindowBounds(
+                                params={'windowId': window_id, 'bounds': {'windowState': 'fullscreen'}}
+                        )
+                        self.logger.debug('Requested fullscreen window state via CDP')
+                except Exception as e:
+                        self.logger.debug(
+                                'Unable to request fullscreen window state via bounds: %s: %s',
+                                type(e).__name__,
+                                e,
+                        )
+                else:
+                        try:
+                                bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
+                                        params={'windowId': window_id}
+                                )
+                                fullscreen_state = (
+                                        (bounds.get('bounds') or {}).get('windowState')
+                                        or (bounds.get('bounds') or {}).get('window_state')
+                                )
+                        except Exception as bounds_error:
+                                self.logger.debug(
+                                        'Unable to verify fullscreen window state: %s: %s',
+                                        type(bounds_error).__name__,
+                                        bounds_error,
+                                )
+
+                if fullscreen_state != 'fullscreen':
+                        session = self.agent_focus
+                        if session:
+                                try:
+                                        await asyncio.sleep(0.1)
+                                        await session.cdp_client.send.Input.dispatchKeyEvent(
+                                                params={
+                                                        'type': 'keyDown',
+                                                        'key': 'F11',
+                                                        'code': 'F11',
+                                                        'windowsVirtualKeyCode': 122,
+                                                        'nativeVirtualKeyCode': 122,
+                                                },
+                                                session_id=session.session_id,
+                                        )
+                                        await session.cdp_client.send.Input.dispatchKeyEvent(
+                                                params={
+                                                        'type': 'keyUp',
+                                                        'key': 'F11',
+                                                        'code': 'F11',
+                                                        'windowsVirtualKeyCode': 122,
+                                                        'nativeVirtualKeyCode': 122,
+                                                },
+                                                session_id=session.session_id,
+                                        )
+                                        self.logger.debug('Dispatched F11 key events to request fullscreen')
+                                except Exception as key_error:
+                                        self.logger.debug(
+                                                'Unable to dispatch fullscreen key events: %s: %s',
+                                                type(key_error).__name__,
+                                                key_error,
+                                        )
+
+                self._fullscreen_requested = True
 
 	async def _setup_proxy_auth(self) -> None:
 		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.
