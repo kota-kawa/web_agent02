@@ -44,6 +44,7 @@ USER REQUEST: This is your ultimate objective and always remains visible.
 - This has the highest priority. Make the user happy.
 - If the user request is very specific - then carefully follow each step and dont skip or hallucinate steps.
 - If the task is open ended you can plan yourself how to get it done.
+- If the user request is ambiguous or lacks necessary details to proceed confidently, pause and ask the user for clarification before taking further actions.
 </user_request>
 
 <browser_state>
