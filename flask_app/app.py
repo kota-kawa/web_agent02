@@ -785,9 +785,17 @@ class BrowserAgentController:
                 'Chrome DevToolsのCDP URLが検出できませんでした。BROWSER_USE_CDP_URL を設定してください。'
             )
 
-        window_width = _env_int('BROWSER_WINDOW_WIDTH', 1920)
-        window_height = _env_int('BROWSER_WINDOW_HEIGHT', 1080)
-        window_size = ViewportSize(width=window_width, height=window_height)
+        window_width_raw = os.environ.get('BROWSER_WINDOW_WIDTH')
+        window_height_raw = os.environ.get('BROWSER_WINDOW_HEIGHT')
+
+        window_size: ViewportSize | None = None
+        screen_size: ViewportSize | None = None
+
+        if window_width_raw is not None or window_height_raw is not None:
+            window_width = _env_int('BROWSER_WINDOW_WIDTH', 1920)
+            window_height = _env_int('BROWSER_WINDOW_HEIGHT', 1080)
+            window_size = ViewportSize(width=window_width, height=window_height)
+            screen_size = window_size
 
         profile = BrowserProfile(
             cdp_url=self._cdp_url,
@@ -795,7 +803,7 @@ class BrowserAgentController:
             highlight_elements=True,
             wait_between_actions=0.4,
             window_size=window_size,
-            screen=window_size,
+            screen=screen_size,
         )
         session = BrowserSession(browser_profile=profile)
         with self._state_lock:
