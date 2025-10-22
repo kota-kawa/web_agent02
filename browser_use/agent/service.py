@@ -878,31 +878,31 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if not needs_refresh:
 			return False
 
-                if self.running:
-                        # Follow-up requests can arrive while the agent is still executing the
-                        # previous task. In that case attempt an immediate rotation so that
-                        # the pending instructions are applied without surfacing an error to
-                        # the user.
-                        self._pending_eventbus_refresh = True
-                        try:
-                                self.logger.debug('🚌 Detected legacy EventBus while running; refreshing immediately')
-                        except Exception:
-                                logger.debug('🚌 Detected legacy EventBus while running; refreshing immediately')
+		if self.running:
+			# Follow-up requests can arrive while the agent is still executing the
+			# previous task. In that case attempt an immediate rotation so that
+			# the pending instructions are applied without surfacing an error to
+			# the user.
+			self._pending_eventbus_refresh = True
+			try:
+				self.logger.debug('🚌 Detected legacy EventBus while running; refreshing immediately')
+			except Exception:
+				logger.debug('🚌 Detected legacy EventBus while running; refreshing immediately')
 
-                        try:
-                                self._reset_eventbus()
-                        except AssertionError:
-                                raise
-                        except Exception:
-                                # If the refresh fails we fall back to the deferred behaviour to
-                                # avoid interrupting the active run.
-                                try:
-                                        self.logger.debug('🚌 Immediate EventBus refresh failed; will retry after run completes', exc_info=True)
-                                except Exception:
-                                        logger.debug('🚌 Immediate EventBus refresh failed; will retry after run completes', exc_info=True)
-                                return False
+			try:
+				self._reset_eventbus()
+			except AssertionError:
+				raise
+			except Exception:
+				# If the refresh fails we fall back to the deferred behaviour to
+				# avoid interrupting the active run.
+				try:
+					self.logger.debug('🚌 Immediate EventBus refresh failed; will retry after run completes', exc_info=True)
+				except Exception:
+					logger.debug('🚌 Immediate EventBus refresh failed; will retry after run completes', exc_info=True)
+				return False
 
-                        return True
+			return True
 
 		try:
 			self.logger.debug(

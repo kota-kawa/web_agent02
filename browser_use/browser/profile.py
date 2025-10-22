@@ -1062,6 +1062,7 @@ async function initialize(checkInitialized, magic) {{
 
 		# Determine viewport behavior based on mode and user preferences
 		user_provided_viewport = self.viewport is not None
+		user_provided_window_size = self.window_size is not None
 
 		if self.headless:
 			# Headless mode: always use viewport for content size control
@@ -1071,7 +1072,19 @@ async function initialize(checkInitialized, magic) {{
 			self.no_viewport = False
 		else:
 			# Headful mode: respect user's viewport preference
-			self.window_size = self.window_size or self.screen
+			if not user_provided_window_size:
+				# Default behaviour should maximise the window to fill the display.
+				# When Chrome receives an explicit --window-size argument it will
+				# use that resolution even if it is smaller than the available
+				# display, which caused the visible gap on wide screens. By leaving
+				# window_size unset we allow the default --start-maximized flag to
+				# take effect and the browser fills all available space. Only keep
+				# window_size when a user explicitly configured it or when no
+				# display is detected (e.g. virtual display fallback).
+				if has_screen_available:
+					self.window_size = None
+				else:
+					self.window_size = ViewportSize(width=1920, height=1080)
 
 			if user_provided_viewport:
 				# User explicitly set viewport - enable viewport mode
