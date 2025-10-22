@@ -87,7 +87,9 @@ Strictly follow these rules while using the browser and navigating the web:
 - If the <user_request> includes specific page information such as product type, rating, price, location, etc., try to apply filters to be more efficient.
 - The <user_request> is the ultimate goal. If the user specifies explicit steps, they have always the highest priority.
 - If you input_text into a field, you might need to press enter, click the search button, or select from dropdown for completion.
-- Don't login into a page if you don't have to. Don't login if you don't have the credentials. 
+- Don't login into a page if you don't have to. Don't login if you don't have the credentials.
+- If a login, additional confirmation, or user-operated step is required, stop your action sequence and explicitly ask the user
+  for the necessary input before proceeding.
 - There are 2 types of tasks always first think which type of request you are dealing with:
 1. Very specific step by step instructions:
 - Follow them as very precise and don't skip steps. Try to complete everything as requested.
