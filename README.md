@@ -84,6 +84,8 @@ docker compose up --build
 
 Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900/?autoconnect=1&resize=scale&scale=auto](http://localhost:7900/?autoconnect=1&resize=scale&scale=auto) so the remote browser fills its frame immediately; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
 
+Before starting the stack, copy `secrets.env.example` to `secrets.env` and add your Gemini/Google API key (either `GOOGLE_API_KEY` or the legacy `GEMINI_API_KEY`). Docker Compose now loads secrets from that file so the key is no longer baked into `docker-compose.yml`.
+
 > ℹ️ The chat panel now drives the embedded browser with the real `browser-use` agent. Add your model credentials (for example `OPENAI_API_KEY=...`) and make sure the Chrome container exposes a DevTools endpoint. The Flask app will try common URLs such as `http://browser:9222`, but you can override it with `BROWSER_USE_CDP_URL` if necessary.
 
 Once the stack is up you can:

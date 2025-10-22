@@ -5,11 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.flask
+    env_file:
+      - secrets.env
     ports:
       - '5005:5005'
     environment:
       - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto
-      - GEMINI_API_KEY=AIzaSyAeLbzEtn0vF6XBAAiD6gTHDNpvpHqKnoE
     depends_on:
       - browser
     networks:
