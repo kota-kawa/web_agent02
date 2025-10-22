@@ -385,6 +385,8 @@ class BrowserSession(BaseModel):
 	_permissions_watchdog: Any | None = PrivateAttr(default=None)
 	_recording_watchdog: Any | None = PrivateAttr(default=None)
 
+	_fullscreen_requested: bool = PrivateAttr(default=False)
+
 	_logger: Any = PrivateAttr(default=None)
 
 	@property
@@ -451,6 +453,7 @@ class BrowserSession(BaseModel):
 		self._screenshot_watchdog = None
 		self._permissions_watchdog = None
 		self._recording_watchdog = None
+		self._fullscreen_requested = False
 
 		if hasattr(self, '_watchdogs_attached'):
 			self._watchdogs_attached = False
@@ -1329,6 +1332,8 @@ class BrowserSession(BaseModel):
 			if self.agent_focus:
 				self._cdp_session_pool[target_id] = self.agent_focus
 
+			await self._apply_initial_window_state(target_id)
+
 			# Enable proxy authentication handling if configured
 			await self._setup_proxy_auth()
 
@@ -1366,6 +1371,38 @@ class BrowserSession(BaseModel):
 			raise RuntimeError(f'Failed to establish CDP connection to browser: {e}') from e
 
 		return self
+
+	async def _apply_initial_window_state(self, target_id: TargetID | None) -> None:
+		"""Request fullscreen bounds for the first window when running headful."""
+
+		if self.browser_profile.headless:
+			return
+
+		if self._fullscreen_requested:
+			return
+
+		if not target_id or not self._cdp_client_root:
+			return
+
+		try:
+				window_info = await self._cdp_client_root.send.Browser.getWindowForTarget(
+					params={'targetId': target_id}
+				)
+				window_id = window_info.get('windowId') or window_info.get('window_id')
+				if window_id is None:
+					return
+
+				await self._cdp_client_root.send.Browser.setWindowBounds(
+					params={'windowId': window_id, 'bounds': {'windowState': 'fullscreen'}}
+				)
+				self._fullscreen_requested = True
+				self.logger.debug('Requested fullscreen window state via CDP')
+		except Exception as e:
+				self.logger.debug(
+					'Unable to request fullscreen window state: %s: %s',
+					type(e).__name__,
+					e,
+				)
 
 	async def _setup_proxy_auth(self) -> None:
 		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.
