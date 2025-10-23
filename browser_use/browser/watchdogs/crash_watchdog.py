@@ -12,12 +12,13 @@ from pydantic import Field, PrivateAttr
 
 from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.events import (
-	BrowserConnectedEvent,
-	BrowserErrorEvent,
-	BrowserStoppedEvent,
-	TabCreatedEvent,
+        BrowserConnectedEvent,
+        BrowserErrorEvent,
+        BrowserStoppedEvent,
+        TabCreatedEvent,
 )
 from browser_use.browser.watchdog_base import BaseWatchdog
+from browser_use.utils import is_default_new_tab_url, is_new_tab_page
 
 if TYPE_CHECKING:
 	pass
@@ -308,7 +309,8 @@ class CrashWatchdog(BaseWatchdog):
 			for target in (await self.browser_session.cdp_client.send.Target.getTargets()).get('targetInfos', []):
 				if target.get('type') == 'page':
 					cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target.get('targetId'))
-                                        if self._is_new_tab_page(target.get('url')) and target.get('url') != DEFAULT_NEW_TAB_URL:
+                                        target_url = target.get('url')
+                                        if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
                                                 self.logger.debug(
                                                         f'[CrashWatchdog] Redirecting chrome://new-tab-page/ to {DEFAULT_NEW_TAB_URL} {target.get("url")}'
                                                 )
@@ -359,5 +361,5 @@ class CrashWatchdog(BaseWatchdog):
 
         @staticmethod
         def _is_new_tab_page(url: str) -> bool:
-                """Check if URL is a new tab page."""
-                return url in [DEFAULT_NEW_TAB_URL, 'about:blank', 'chrome://new-tab-page/', 'chrome://newtab/']
+                """Backwards compatibility helper for legacy imports."""
+                return is_new_tab_page(url)

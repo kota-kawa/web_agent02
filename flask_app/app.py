@@ -26,6 +26,7 @@ from flask.typing import ResponseReturnValue
 
 from browser_use import Agent, BrowserProfile, BrowserSession
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.llm.google.chat import ChatGoogle
@@ -297,7 +298,7 @@ def _normalize_start_url(value: str | None) -> str | None:
 
 _DEFAULT_START_URL = _normalize_start_url(
     _get_env_trimmed('BROWSER_DEFAULT_START_URL'),
-) or 'https://www.yahoo.co.jp'
+) or DEFAULT_NEW_TAB_URL
 
 _LANGUAGE_EXTENSION = (
     '### 追加の言語ガイドライン\n'

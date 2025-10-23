@@ -42,7 +42,7 @@ from browser_use.browser.profile import BrowserProfile, ProxySettings
 from browser_use.browser.views import BrowserStateSummary, TabInfo
 from browser_use.dom.views import EnhancedDOMTreeNode, TargetInfo
 from browser_use.observability import observe_debug
-from browser_use.utils import _log_pretty_url, is_new_tab_page
+from browser_use.utils import _log_pretty_url, is_default_new_tab_url, is_new_tab_page
 
 async def ensure_browser_state_handler_registered(session: 'BrowserSession') -> None:
     """Ensure the DOM watchdog handler that yields BrowserStateSummary is registered."""
@@ -641,16 +641,15 @@ class BrowserSession(BaseModel):
 		target_id = None
 
 		# If new_tab=True but we're already in a new tab, set new_tab=False
-		if event.new_tab:
-			try:
-				current_url = await self.get_current_page_url()
-				from browser_use.utils import is_new_tab_page
+                if event.new_tab:
+                        try:
+                                current_url = await self.get_current_page_url()
 
-				if is_new_tab_page(current_url):
-					self.logger.debug(f'[on_NavigateToUrlEvent] Already in new tab ({current_url}), setting new_tab=False')
-					event.new_tab = False
-			except Exception as e:
-				self.logger.debug(f'[on_NavigateToUrlEvent] Could not check current URL: {e}')
+                                if is_new_tab_page(current_url):
+                                        self.logger.debug(f'[on_NavigateToUrlEvent] Already in new tab ({current_url}), setting new_tab=False')
+                                        event.new_tab = False
+                        except Exception as e:
+                                self.logger.debug(f'[on_NavigateToUrlEvent] Could not check current URL: {e}')
 
 		# check if the url is already open in a tab somewhere that we're not currently on, if so, short-circuit and just switch to it
 		targets = await self._cdp_get_all_pages()
@@ -676,7 +675,7 @@ class BrowserSession(BaseModel):
                                                 f'[on_NavigateToUrlEvent] Tab {idx}: url={target.get("url")}, targetId={target["targetId"]}'
                                         )
                                         if (
-                                                target.get('url') in (DEFAULT_NEW_TAB_URL, 'about:blank')
+                                                is_new_tab_page(target.get('url'))
                                                 and target['targetId'] != current_target_id
                                         ):
                                                 target_id = target['targetId']
@@ -755,7 +754,7 @@ class BrowserSession(BaseModel):
                                 AgentFocusChangedEvent(target_id=target_id, url=event.url)
                         )  # do not await! AgentFocusChangedEvent calls SwitchTabEvent and it will deadlock, dispatch to enqueue and return
 
-                        if event.url == DEFAULT_NEW_TAB_URL:
+                        if is_default_new_tab_url(event.url):
                                 await self._close_data_url_tabs(exclude_target_id=target_id)
 
 			# Note: These should be handled by dedicated watchdogs:
@@ -1292,14 +1291,12 @@ class BrowserSession(BaseModel):
 
                         # Check for chrome://newtab pages and immediately redirect them
                         # to the default start page to avoid JS issues from CDP on chrome://* urls
-			from browser_use.utils import is_new_tab_page
-
-			# Collect all targets that need redirection
-			redirected_targets = []
+                        # Collect all targets that need redirection
+                        redirected_targets = []
 			redirect_sessions = {}  # Store sessions created for redirection to potentially reuse
 			for target in page_targets:
 				target_url = target.get('url', '')
-                                if is_new_tab_page(target_url) and target_url != DEFAULT_NEW_TAB_URL:
+                                if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
                                         # Redirect chrome://newtab to the default start page to avoid JS issues preventing driving chrome://newtab
                                         target_id = target['targetId']
                                         self.logger.debug(
@@ -2298,10 +2295,8 @@ class BrowserSession(BaseModel):
 
 		# Always allow new tab pages (chrome://new-tab-page/, chrome://newtab/, about:blank)
 		# so they can be redirected to about:blank in connect()
-		from browser_use.utils import is_new_tab_page
-
-		if is_new_tab_page(url):
-			url_allowed = True
+                if is_new_tab_page(url):
+                        url_allowed = True
 
 		if url.startswith('chrome-error://') and include_chrome_error:
 			url_allowed = True
