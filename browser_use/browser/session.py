@@ -1404,7 +1404,7 @@ class BrowserSession(BaseModel):
 		async def _get_window_state() -> str | None:
 			try:
 				bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
-					params={'windowId': window_id}
+					params={'windowId': window_id},
 				)
 			except Exception as bounds_error:
 				self.logger.debug(
@@ -1414,15 +1414,18 @@ class BrowserSession(BaseModel):
 				)
 				return None
 
+			bounds_data = bounds.get('bounds') or {}
 			return (
-				(bounds.get('bounds') or {}).get('windowState')
-				or (bounds.get('bounds') or {}).get('window_state')
+				bounds_data.get('windowState')
+				or bounds_data.get('window_state')
+				or bounds_data.get('state')
 			)
+
 
 		async def _set_window_state(desired_state: str) -> str | None:
 			try:
 				await self._cdp_client_root.send.Browser.setWindowBounds(
-					params={'windowId': window_id, 'bounds': {'windowState': desired_state}}
+					params={'windowId': window_id, 'bounds': {'windowState': desired_state, 'state': desired_state}},
 				)
 				self.logger.debug('Requested %s window state via CDP', desired_state)
 			except Exception as e:
@@ -1434,12 +1437,18 @@ class BrowserSession(BaseModel):
 				)
 				return None
 
+			await asyncio.sleep(0.1)
 			return await _get_window_state()
+
 
 		fullscreen_state: str | None = None
 
 		for desired_state in ('fullscreen', 'maximized'):
-			fullscreen_state = await _set_window_state(desired_state)
+			for attempt in range(3):
+				fullscreen_state = await _set_window_state(desired_state)
+				if fullscreen_state == desired_state:
+					break
+				await asyncio.sleep(0.2)
 			if fullscreen_state == desired_state:
 				break
 
@@ -1452,6 +1461,7 @@ class BrowserSession(BaseModel):
 							'windowId': window_id,
 							'bounds': {
 								'windowState': 'normal',
+								'state': 'normal',
 								'left': 0,
 								'top': 0,
 								'width': screen.width,
@@ -1482,27 +1492,34 @@ class BrowserSession(BaseModel):
 						bring_to_front_error,
 					)
 				try:
-					await session.cdp_client.send.Input.dispatchKeyEvent(
-						params={
-							'type': 'keyDown',
-							'key': 'F11',
-							'code': 'F11',
-							'windowsVirtualKeyCode': 122,
-							'nativeVirtualKeyCode': 122,
-						},
-						session_id=session.session_id,
+					await session.cdp_client.send.Page.bringToFront(session_id=session.session_id)
+				except Exception as page_front_error:
+					self.logger.debug(
+						'Unable to request Page.bringToFront before fullscreen key events: %s: %s',
+						type(page_front_error).__name__,
+						page_front_error,
 					)
+				try:
+					key_payload = {
+						'key': 'F11',
+						'code': 'F11',
+						'windowsVirtualKeyCode': 122,
+						'nativeVirtualKeyCode': 122,
+					}
+					for event_type in ('rawKeyDown', 'keyDown'):
+						await session.cdp_client.send.Input.dispatchKeyEvent(
+							params={'type': event_type, **key_payload},
+							session_id=session.session_id,
+						)
 					await session.cdp_client.send.Input.dispatchKeyEvent(
-						params={
-							'type': 'keyUp',
-							'key': 'F11',
-							'code': 'F11',
-							'windowsVirtualKeyCode': 122,
-							'nativeVirtualKeyCode': 122,
-						},
-						session_id=session.session_id,
-					)
+							params={'type': 'keyUp', **key_payload},
+							session_id=session.session_id,
+						)
 					self.logger.debug('Dispatched F11 key events to request fullscreen')
+					await asyncio.sleep(0.3)
+					fullscreen_state = await _get_window_state()
+					if fullscreen_state not in {'fullscreen', 'maximized'}:
+						fullscreen_state = await _set_window_state('maximized')
 				except Exception as key_error:
 					self.logger.debug(
 						'Unable to dispatch fullscreen key events: %s: %s',
