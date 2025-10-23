@@ -1304,24 +1304,44 @@ class BrowserAgentController:
         if running or shutdown:
             return
 
-        async def _warmup() -> None:
+        async def _warmup() -> str | None:
             session = await self._ensure_browser_session()
+            try:
+                await session.start()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to start browser session during warmup', exc_info=True)
+                raise
+
             try:
                 await session.attach_all_watchdogs()
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to pre-attach browser watchdogs during warmup', exc_info=True)
+
             try:
                 await session.navigate_to(start_url, new_tab=False)
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to warm up start URL %s', start_url, exc_info=True)
                 raise
 
+            try:
+                return await session.get_current_page_url()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to verify browser location after warmup', exc_info=True)
+                return None
+
         try:
             future = asyncio.run_coroutine_threadsafe(_warmup(), self._loop)
-            future.result(timeout=20)
+            current_url = future.result(timeout=20)
         except Exception:  # noqa: BLE001
             self._logger.debug('Failed to prepare browser start page', exc_info=True)
             return
+
+        if current_url and current_url.rstrip('/') != start_url.rstrip('/'):
+            self._logger.debug(
+                'Browser start page warmup navigated to %s instead of configured %s',
+                current_url,
+                start_url,
+            )
 
         with self._state_lock:
             if self._browser_session is not None:
