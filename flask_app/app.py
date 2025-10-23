@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import atexit
 import asyncio
+import atexit
 import copy
 import inspect
 import json
@@ -19,15 +19,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+from bubus import EventBus
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from flask.typing import ResponseReturnValue
 
-from bubus import EventBus
-
 from browser_use import Agent, BrowserProfile, BrowserSession
-from browser_use.browser.profile import ViewportSize
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
+from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.llm.google.chat import ChatGoogle
 
@@ -768,6 +767,7 @@ class BrowserAgentController:
         self._step_message_lock = threading.Lock()
         self._resume_url: str | None = None
         self._session_recreated = False
+        self._start_page_ready = False
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -809,6 +809,7 @@ class BrowserAgentController:
         with self._state_lock:
             self._browser_session = session
             self._session_recreated = True
+            self._start_page_ready = False
         return session
 
     def _consume_session_recreated(self) -> bool:
@@ -1096,6 +1097,7 @@ class BrowserAgentController:
             session = self._browser_session
             self._browser_session = None
             self._session_recreated = False
+            self._start_page_ready = False
         return session
 
     def _stop_browser_session(self) -> None:
@@ -1286,6 +1288,45 @@ class BrowserAgentController:
         with self._state_lock:
             return self._paused
 
+    def ensure_start_page_ready(self) -> None:
+        """Ensure the embedded browser session opens the configured start URL."""
+
+        start_url = self._get_resume_url() or _DEFAULT_START_URL
+        if not start_url:
+            return
+
+        with self._state_lock:
+            if self._start_page_ready and self._browser_session is not None:
+                return
+            running = self._is_running
+            shutdown = self._shutdown
+
+        if running or shutdown:
+            return
+
+        async def _warmup() -> None:
+            session = await self._ensure_browser_session()
+            try:
+                await session.attach_all_watchdogs()
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to pre-attach browser watchdogs during warmup', exc_info=True)
+            try:
+                await session.navigate_to(start_url, new_tab=False)
+            except Exception:  # noqa: BLE001
+                self._logger.debug('Failed to warm up start URL %s', start_url, exc_info=True)
+                raise
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(_warmup(), self._loop)
+            future.result(timeout=20)
+        except Exception:  # noqa: BLE001
+            self._logger.debug('Failed to prepare browser start page', exc_info=True)
+            return
+
+        with self._state_lock:
+            if self._browser_session is not None:
+                self._start_page_ready = True
+
     def reset(self) -> None:
         with self._state_lock:
             if self._is_running:
@@ -1387,6 +1428,20 @@ def _get_existing_controller() -> BrowserAgentController:
 
 @app.route('/')
 def index() -> str:
+    try:
+        controller = _get_agent_controller()
+    except AgentControllerError:
+        controller = None
+    except Exception:  # noqa: BLE001
+        logger.debug('Unexpected error while preparing browser controller on index load', exc_info=True)
+        controller = None
+
+    if controller is not None:
+        try:
+            controller.ensure_start_page_ready()
+        except Exception:  # noqa: BLE001
+            logger.debug('Failed to warm up browser start page on index load', exc_info=True)
+
     return render_template('index.html', browser_url=_BROWSER_URL)
 
 
