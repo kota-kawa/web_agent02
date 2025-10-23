@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
+
 load_dotenv()
 
 # Pre-compiled regex for URL detection - used in URL shortening
@@ -419,8 +421,8 @@ def is_unsafe_pattern(pattern: str) -> bool:
 
 
 def is_new_tab_page(url: str) -> bool:
-	"""
-	Check if a URL is a new tab page (about:blank, chrome://new-tab-page, or chrome://newtab).
+        """
+        Check if a URL is a new tab page (default start page, about:blank, chrome://new-tab-page, or chrome://newtab).
 
 	Args:
 		url: The URL to check
@@ -428,7 +430,14 @@ def is_new_tab_page(url: str) -> bool:
 	Returns:
 		bool: True if the URL is a new tab page, False otherwise
 	"""
-	return url in ('about:blank', 'chrome://new-tab-page/', 'chrome://new-tab-page', 'chrome://newtab/', 'chrome://newtab')
+        return url in (
+                DEFAULT_NEW_TAB_URL,
+                'about:blank',
+                'chrome://new-tab-page/',
+                'chrome://new-tab-page',
+                'chrome://newtab/',
+                'chrome://newtab',
+        )
 
 
 def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: bool = False) -> bool:

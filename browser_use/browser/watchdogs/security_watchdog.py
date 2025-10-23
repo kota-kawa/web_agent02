@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from bubus import BaseEvent
 
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.events import (
 	BrowserErrorEvent,
 	NavigateToUrlEvent,
@@ -136,7 +137,7 @@ class SecurityWatchdog(BaseWatchdog):
 			return True
 
 		# Always allow internal browser targets
-		if url in ['about:blank', 'chrome://new-tab-page/', 'chrome://new-tab-page', 'chrome://newtab/']:
+                if url in [DEFAULT_NEW_TAB_URL, 'about:blank', 'chrome://new-tab-page/', 'chrome://new-tab-page', 'chrome://newtab/']:
 			return True
 
 		# Parse the URL to extract components
