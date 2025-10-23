@@ -110,6 +110,10 @@ class LocalBrowserWatchdog(BaseWatchdog):
 						f'--remote-debugging-port={debug_port}',
 					]
 				)
+				
+				# Add homepage URL so browser starts with it already open
+				from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
+				launch_args.append(DEFAULT_NEW_TAB_URL)
 				assert '--user-data-dir' in str(launch_args), (
 					'User data dir must be set somewhere in launch args to a non-default path, otherwise Chrome will not let us attach via CDP'
 				)
