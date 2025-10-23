@@ -420,22 +420,36 @@ def is_unsafe_pattern(pattern: str) -> bool:
 	return '*' in bare_domain
 
 
+def _normalize_new_tab_candidate(url: str) -> str:
+        """Normalize a URL candidate for new tab comparisons."""
+
+        if not url:
+                return ''
+
+        normalized = url.strip()
+        if not normalized:
+                return ''
+
+        # Normalize case for comparisons and remove a single trailing slash so
+        # ``https://example.com`` and ``https://example.com/`` are treated the same.
+        normalized = normalized.rstrip('/')
+        return normalized.lower()
+
+
+def is_default_new_tab_url(url: str) -> bool:
+        """Return True if *url* matches the configured default new tab URL."""
+
+        return _normalize_new_tab_candidate(url) == _normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL)
+
+
 def is_new_tab_page(url: str) -> bool:
-        """
-        Check if a URL is a new tab page (default start page, about:blank, chrome://new-tab-page, or chrome://newtab).
+        """Return True if *url* should be treated as a browser new tab page."""
 
-	Args:
-		url: The URL to check
-
-	Returns:
-		bool: True if the URL is a new tab page, False otherwise
-	"""
-        return url in (
-                DEFAULT_NEW_TAB_URL,
+        normalized = _normalize_new_tab_candidate(url)
+        return normalized in (
+                _normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL),
                 'about:blank',
-                'chrome://new-tab-page/',
                 'chrome://new-tab-page',
-                'chrome://newtab/',
                 'chrome://newtab',
         )
 
