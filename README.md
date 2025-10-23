@@ -82,7 +82,7 @@ This repository now includes a simple local dashboard that embeds a real browser
 docker compose up --build
 ```
 
-Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900/?autoconnect=1&resize=scale&scale=auto](http://localhost:7900/?autoconnect=1&resize=scale&scale=auto) so the remote browser fills its frame immediately; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
+Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false](http://localhost:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false) so the remote browser fills its frame immediately in full screen mode; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
 
 Before starting the stack, copy `secrets.env.example` to `secrets.env` and add your Gemini/Google API key (either `GOOGLE_API_KEY` or the legacy `GEMINI_API_KEY`). Docker Compose now loads secrets from that file so the key is no longer baked into `docker-compose.yml`.
 
