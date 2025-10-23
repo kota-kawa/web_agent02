@@ -10,6 +10,7 @@ from cdp_use.cdp.target import SessionID, TargetID
 from cdp_use.cdp.target.events import TargetCrashedEvent
 from pydantic import Field, PrivateAttr
 
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.events import (
 	BrowserConnectedEvent,
 	BrowserErrorEvent,
@@ -307,13 +308,13 @@ class CrashWatchdog(BaseWatchdog):
 			for target in (await self.browser_session.cdp_client.send.Target.getTargets()).get('targetInfos', []):
 				if target.get('type') == 'page':
 					cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target.get('targetId'))
-					if self._is_new_tab_page(target.get('url')) and target.get('url') != 'about:blank':
-						self.logger.debug(
-							f'[CrashWatchdog] Redirecting chrome://new-tab-page/ to about:blank {target.get("url")}'
-						)
-						await cdp_session.cdp_client.send.Page.navigate(
-							params={'url': 'about:blank'}, session_id=cdp_session.session_id
-						)
+                                        if self._is_new_tab_page(target.get('url')) and target.get('url') != DEFAULT_NEW_TAB_URL:
+                                                self.logger.debug(
+                                                        f'[CrashWatchdog] Redirecting chrome://new-tab-page/ to {DEFAULT_NEW_TAB_URL} {target.get("url")}'
+                                                )
+                                                await cdp_session.cdp_client.send.Page.navigate(
+                                                        params={'url': DEFAULT_NEW_TAB_URL}, session_id=cdp_session.session_id
+                                                )
 
 			# Quick ping to check if session is alive
 			self.logger.debug(f'[CrashWatchdog] Attempting to run simple JS test expression in session {cdp_session} 1+1')
@@ -356,7 +357,7 @@ class CrashWatchdog(BaseWatchdog):
 			except Exception:
 				pass  # psutil not available or process doesn't exist
 
-	@staticmethod
-	def _is_new_tab_page(url: str) -> bool:
-		"""Check if URL is a new tab page."""
-		return url in ['about:blank', 'chrome://new-tab-page/', 'chrome://newtab/']
+        @staticmethod
+        def _is_new_tab_page(url: str) -> bool:
+                """Check if URL is a new tab page."""
+                return url in [DEFAULT_NEW_TAB_URL, 'about:blank', 'chrome://new-tab-page/', 'chrome://newtab/']
