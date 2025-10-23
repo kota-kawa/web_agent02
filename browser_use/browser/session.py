@@ -1398,13 +1398,20 @@ class BrowserSession(BaseModel):
 			)
 			return
 
-		if window_id is None:
-			return
+                if window_id is None:
+                        return
 
-		async def _get_window_state() -> str | None:
-			try:
-				bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
-					params={'windowId': window_id},
+                # Give the newly created Chrome window a moment to finish rendering
+                # before we try to manipulate its bounds. This ensures the fullscreen
+                # (maximize) request happens roughly one second after the window
+                # becomes visible, matching the desired behaviour of clicking the
+                # fullscreen toolbar button after the browser appears.
+                await asyncio.sleep(1.0)
+
+                async def _get_window_state() -> str | None:
+                        try:
+                                bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
+                                        params={'windowId': window_id},
 				)
 			except Exception as bounds_error:
 				self.logger.debug(
