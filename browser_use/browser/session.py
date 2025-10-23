@@ -1448,11 +1448,11 @@ class BrowserSession(BaseModel):
 			)
 
 
-		async def _set_window_state(desired_state: str) -> str | None:
-			try:
-				await self._cdp_client_root.send.Browser.setWindowBounds(
-					params={'windowId': window_id, 'bounds': {'windowState': desired_state, 'state': desired_state}},
-				)
+                async def _set_window_state(desired_state: str) -> str | None:
+                        try:
+                                await self._cdp_client_root.send.Browser.setWindowBounds(
+                                        params={'windowId': window_id, 'bounds': {'windowState': desired_state}},
+                                )
 				self.logger.debug('Requested %s window state via CDP', desired_state)
 			except Exception as e:
 				self.logger.debug(
@@ -1482,19 +1482,18 @@ class BrowserSession(BaseModel):
 			screen = self.browser_profile.screen
 			if screen:
 				try:
-					await self._cdp_client_root.send.Browser.setWindowBounds(
-						params={
-							'windowId': window_id,
-							'bounds': {
-								'windowState': 'normal',
-								'state': 'normal',
-								'left': 0,
-								'top': 0,
-								'width': screen.width,
-								'height': screen.height,
-							},
-						},
-					)
+                                        await self._cdp_client_root.send.Browser.setWindowBounds(
+                                                params={
+                                                        'windowId': window_id,
+                                                        'bounds': {
+                                                                'windowState': 'normal',
+                                                                'left': 0,
+                                                                'top': 0,
+                                                                'width': screen.width,
+                                                                'height': screen.height,
+                                                        },
+                                                },
+                                        )
 					fullscreen_state = await _get_window_state()
 				except Exception as size_error:
 					self.logger.debug(
