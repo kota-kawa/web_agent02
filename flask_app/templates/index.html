@@ -681,30 +681,39 @@
           toolbar.appendChild(fullscreenButton);
         }
 
-        // Automatically trigger fullscreen on first user interaction
+        // Automatically trigger fullscreen immediately on page load
         let fullscreenTriggered = false;
         const triggerFullscreen = () => {
           if (!fullscreenTriggered) {
             fullscreenTriggered = true;
             const shell = document.querySelector('.browser-shell');
             const target = shell || browserIframe;
-            setTimeout(() => {
-              if (target.requestFullscreen) {
-                target.requestFullscreen().catch(err => {
-                  console.log('自動全画面表示に失敗しました。ツールバーの「全画面表示」ボタンをクリックしてください。', err);
-                });
-              } else if (target.webkitRequestFullscreen) {
-                target.webkitRequestFullscreen();
-              } else if (target.mozRequestFullScreen) {
-                target.mozRequestFullScreen();
-              } else if (target.msRequestFullscreen) {
-                target.msRequestFullscreen();
-              }
-            }, 300);
+            if (target.requestFullscreen) {
+              target.requestFullscreen().catch(err => {
+                console.log('自動全画面表示には最初のクリックが必要です。ページのどこかをクリックするか、ツールバーの「全画面表示」ボタンをクリックしてください。', err);
+                // If automatic fullscreen fails, set up listener for first click
+                document.addEventListener('click', () => {
+                  if (!document.fullscreenElement) {
+                    target.requestFullscreen().catch(e => console.log('全画面表示に失敗:', e));
+                  }
+                }, { once: true });
+              });
+            } else if (target.webkitRequestFullscreen) {
+              target.webkitRequestFullscreen();
+            } else if (target.mozRequestFullScreen) {
+              target.mozRequestFullScreen();
+            } else if (target.msRequestFullscreen) {
+              target.msRequestFullscreen();
+            }
           }
         };
         
-        // Set up listener for first click to auto-trigger fullscreen
+        // Try to trigger fullscreen immediately on load
+        window.addEventListener('load', () => {
+          setTimeout(triggerFullscreen, 500);
+        });
+        
+        // Also set up listener for first click as fallback
         document.addEventListener('click', triggerFullscreen, { once: true });
       }
     </script>
