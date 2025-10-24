@@ -24,9 +24,23 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from flask.typing import ResponseReturnValue
 
-from browser_use import Agent, BrowserProfile, BrowserSession
+try:
+    from browser_use import Agent, BrowserProfile, BrowserSession
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+
+    ROOT_DIR = Path(__file__).resolve().parents[1]
+    if str(ROOT_DIR) not in sys.path:
+        sys.path.insert(0, str(ROOT_DIR))
+    from browser_use import Agent, BrowserProfile, BrowserSession
+
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
-from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
+
+try:
+    from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
+except ModuleNotFoundError:
+    DEFAULT_NEW_TAB_URL = "https://www.yahoo.co.jp"
 from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.llm.google.chat import ChatGoogle
