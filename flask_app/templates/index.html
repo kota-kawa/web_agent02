@@ -151,16 +151,70 @@
         }
       }
 
+      let thinkingMessageElement = null;
+
+      function createThinkingMessage() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'msg system compact assistant pending thinking';
+        wrapper.id = 'thinking-message';
+
+        const header = document.createElement('div');
+        header.className = 'thinking-header';
+
+        const orb = document.createElement('span');
+        orb.className = 'thinking-orb';
+        orb.setAttribute('aria-hidden', 'true');
+        header.appendChild(orb);
+
+        const labels = document.createElement('span');
+        labels.className = 'thinking-labels';
+
+        const title = document.createElement('span');
+        title.className = 'thinking-title';
+        title.textContent = 'AIが考えています';
+        labels.appendChild(title);
+
+        const sub = document.createElement('span');
+        sub.className = 'thinking-sub';
+        sub.textContent = '見つけた情報から回答を組み立て中';
+        labels.appendChild(sub);
+
+        header.appendChild(labels);
+        wrapper.appendChild(header);
+
+        const time = document.createElement('span');
+        time.className = 'msg-time';
+        const now = new Date();
+        time.textContent = now.toLocaleString('ja-JP', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        }).replace(/\//g, '/');
+        wrapper.appendChild(time);
+
+        return wrapper;
+      }
+
       function setMessagesBusy(isBusy) {
         if (!messagesElement) {
           return;
         }
         if (isBusy) {
-          messagesElement.classList.add('is-busy');
           messagesElement.setAttribute('aria-busy', 'true');
+          if (!thinkingMessageElement) {
+            thinkingMessageElement = createThinkingMessage();
+            messagesElement.appendChild(thinkingMessageElement);
+            messagesElement.scrollTop = messagesElement.scrollHeight;
+          }
         } else {
-          messagesElement.classList.remove('is-busy');
           messagesElement.setAttribute('aria-busy', 'false');
+          if (thinkingMessageElement) {
+            thinkingMessageElement.remove();
+            thinkingMessageElement = null;
+          }
         }
       }
 
