@@ -1057,7 +1057,10 @@ async function initialize(checkInitialized, magic) {{
 		"""
 
 		display_size = get_display_size()
-		has_screen_available = bool(display_size)
+		force_remote_headful = bool(self.cdp_url and not self.is_local)
+		# Remote CDP sessions (e.g. selenium/standalone-chrome) expose a headful display
+		# even when local display detection fails, so treat them as screen-available.
+		has_screen_available = bool(display_size) or force_remote_headful
 		self.screen = self.screen or display_size or ViewportSize(width=1920, height=1080)
 
 		# if no headless preference specified, prefer headful if there is a display available
