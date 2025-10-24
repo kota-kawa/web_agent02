@@ -217,7 +217,7 @@ def _reset_history() -> list[dict[str, str | int]]:
     _broadcaster.publish_reset()
     return snapshot
 
-_DEFAULT_EMBED_BROWSER_URL = 'http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto'
+_DEFAULT_EMBED_BROWSER_URL = 'http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false'
 _ALLOWED_RESIZE_VALUES = {'scale', 'remote', 'off'}
 
 

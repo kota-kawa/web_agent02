@@ -10,7 +10,7 @@ services:
     ports:
       - '5005:5005'
     environment:
-      - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto
+      - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false
     depends_on:
       - browser
     networks:
