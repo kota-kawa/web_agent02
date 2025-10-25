@@ -655,57 +655,31 @@
       loadHistory();
       updatePauseButtonState();
 
-      // Auto-fullscreen functionality for noVNC iframe
+      // Ensure the embedded noVNC session fills the browser pane
       const browserIframe = document.querySelector('.browser-pane iframe');
       if (browserIframe) {
-        // Add a fullscreen button to the browser toolbar
-        const toolbar = document.querySelector('.browser-toolbar');
-        if (toolbar) {
-          const fullscreenButton = document.createElement('button');
-          fullscreenButton.className = 'control-button control-button--primary';
-          fullscreenButton.textContent = '全画面表示';
-          fullscreenButton.style.marginLeft = 'auto';
-          fullscreenButton.addEventListener('click', () => {
-            const shell = document.querySelector('.browser-shell');
-            const target = shell || browserIframe;
-            if (target.requestFullscreen) {
-              target.requestFullscreen();
-            } else if (target.webkitRequestFullscreen) {
-              target.webkitRequestFullscreen();
-            } else if (target.mozRequestFullScreen) {
-              target.mozRequestFullScreen();
-            } else if (target.msRequestFullscreen) {
-              target.msRequestFullscreen();
-            }
-          });
-          toolbar.appendChild(fullscreenButton);
+        const shell = document.querySelector('.browser-shell');
+        const toolbar = shell?.querySelector('.browser-toolbar');
+
+        const syncIframeHeight = () => {
+          if (!shell) {
+            return;
+          }
+          const toolbarHeight = toolbar?.offsetHeight ?? 0;
+          const nextHeight = Math.max(shell.clientHeight - toolbarHeight, 0);
+          browserIframe.style.height = `${nextHeight}px`;
+        };
+
+        if (shell) {
+          if (typeof ResizeObserver !== 'undefined') {
+            const resizeObserver = new ResizeObserver(syncIframeHeight);
+            resizeObserver.observe(shell);
+          } else {
+            window.addEventListener('resize', syncIframeHeight);
+          }
         }
 
-        // Automatically trigger fullscreen on first user interaction
-        let fullscreenTriggered = false;
-        const triggerFullscreen = () => {
-          if (!fullscreenTriggered) {
-            fullscreenTriggered = true;
-            const shell = document.querySelector('.browser-shell');
-            const target = shell || browserIframe;
-            setTimeout(() => {
-              if (target.requestFullscreen) {
-                target.requestFullscreen().catch(err => {
-                  console.log('自動全画面表示に失敗しました。ツールバーの「全画面表示」ボタンをクリックしてください。', err);
-                });
-              } else if (target.webkitRequestFullscreen) {
-                target.webkitRequestFullscreen();
-              } else if (target.mozRequestFullScreen) {
-                target.mozRequestFullScreen();
-              } else if (target.msRequestFullscreen) {
-                target.msRequestFullscreen();
-              }
-            }, 300);
-          }
-        };
-        
-        // Set up listener for first click to auto-trigger fullscreen
-        document.addEventListener('click', triggerFullscreen, { once: true });
+        syncIframeHeight();
       }
     </script>
   </body>
