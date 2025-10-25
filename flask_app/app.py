@@ -802,17 +802,37 @@ class BrowserAgentController:
                 'Chrome DevToolsのCDP URLが検出できませんでした。BROWSER_USE_CDP_URL を設定してください。'
             )
 
-        window_width_raw = os.environ.get('BROWSER_WINDOW_WIDTH')
-        window_height_raw = os.environ.get('BROWSER_WINDOW_HEIGHT')
+        def _viewport_from_env(
+            width_key: str,
+            height_key: str,
+            default_width: int,
+            default_height: int,
+        ) -> ViewportSize | None:
+            """Create a viewport from environment variables if either is defined."""
+
+            width_raw = os.environ.get(width_key)
+            height_raw = os.environ.get(height_key)
+
+            if width_raw is None and height_raw is None:
+                return None
+
+            width = _env_int(width_key, default_width)
+            height = _env_int(height_key, default_height)
+
+            return ViewportSize(width=width, height=height)
 
         window_size: ViewportSize | None = None
         screen_size: ViewportSize | None = None
 
-        if window_width_raw is not None or window_height_raw is not None:
-            window_width = _env_int('BROWSER_WINDOW_WIDTH', 1920)
-            window_height = _env_int('BROWSER_WINDOW_HEIGHT', 1080)
-            window_size = ViewportSize(width=window_width, height=window_height)
-            screen_size = window_size
+        browser_window = _viewport_from_env('BROWSER_WINDOW_WIDTH', 'BROWSER_WINDOW_HEIGHT', 1920, 1080)
+        if browser_window is not None:
+            window_size = browser_window
+            screen_size = browser_window
+        else:
+            selenium_window = _viewport_from_env('SE_SCREEN_WIDTH', 'SE_SCREEN_HEIGHT', 1920, 1080)
+            if selenium_window is not None:
+                window_size = selenium_window
+                screen_size = selenium_window
 
         profile = BrowserProfile(
             cdp_url=self._cdp_url,
