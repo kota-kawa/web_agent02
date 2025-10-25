@@ -386,7 +386,7 @@ class BrowserSession(BaseModel):
 	_permissions_watchdog: Any | None = PrivateAttr(default=None)
 	_recording_watchdog: Any | None = PrivateAttr(default=None)
 
-	_fullscreen_requested: bool = PrivateAttr(default=False)
+        _initial_window_state_applied: bool = PrivateAttr(default=False)
 
 	_logger: Any = PrivateAttr(default=None)
 
@@ -453,8 +453,8 @@ class BrowserSession(BaseModel):
 		self._dom_watchdog = None
 		self._screenshot_watchdog = None
 		self._permissions_watchdog = None
-		self._recording_watchdog = None
-		self._fullscreen_requested = False
+                self._recording_watchdog = None
+                self._initial_window_state_applied = False
 
 		if hasattr(self, '_watchdogs_attached'):
 			self._watchdogs_attached = False
@@ -1388,6 +1388,7 @@ class BrowserSession(BaseModel):
 
 		return self
 
+
 	def _should_apply_initial_window_state(self) -> bool:
 		"""Determine whether fullscreen requests should run for this session."""
 
@@ -1544,7 +1545,8 @@ class BrowserSession(BaseModel):
 				except Exception as key_error:
 					self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
 
-		self._fullscreen_requested = True
+
+                self._initial_window_state_applied = True
 
 	async def _setup_proxy_auth(self) -> None:
 		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.

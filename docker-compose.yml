@@ -10,7 +10,7 @@ services:
     ports:
       - '5005:5005'
     environment:
-      - EMBED_BROWSER_URL=http://127.0.0.1:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false
+      - EMBED_BROWSER_URL=http://127.0.0.1:7900/vnc_lite.html?autoconnect=1&resize=scale&scale=auto&view_clip=false
     depends_on:
       - browser
     networks:
@@ -27,7 +27,7 @@ services:
       - SE_VNC_NO_PASSWORD=1
       - SE_SCREEN_WIDTH=1920
       - SE_SCREEN_HEIGHT=1080
-      - SE_NODE_OVERRIDE_CAPABILITIES={"browserName":"chrome","platformName":"linux","goog:chromeOptions":{"args":["--start-maximized","--start-fullscreen"]}}
+      - SE_NODE_OVERRIDE_CAPABILITIES={"browserName":"chrome","platformName":"linux","goog:chromeOptions":{"args":["--start-maximized"]}}
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:4444/status || exit 1']
       interval: 30s
