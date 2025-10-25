@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlparse
 
-from pydantic import AfterValidator, AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+        AfterValidator,
+        AliasChoices,
+        BaseModel,
+        ConfigDict,
+        Field,
+        PrivateAttr,
+        field_validator,
+        model_validator,
+)
 
 from browser_use.config import CONFIG
 from browser_use.utils import _log_pretty_path, logger
@@ -547,8 +556,11 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 	# ... extends options defined in:
 	# BrowserLaunchPersistentContextArgs, BrowserLaunchArgs, BrowserNewContextArgs, BrowserConnectArgs
 
-	# Session/connection configuration
-	cdp_url: str | None = Field(default=None, description='CDP URL for connecting to existing browser instance')
+        # Internal tracking (not part of public schema)
+        _detected_screen: ViewportSize | None = PrivateAttr(default=None)
+
+        # Session/connection configuration
+        cdp_url: str | None = Field(default=None, description='CDP URL for connecting to existing browser instance')
 	is_local: bool = Field(default=False, description='Whether this is a local browser instance')
 	# label: str = 'default'
 
@@ -1064,12 +1076,14 @@ async function initialize(checkInitialized, magic) {{
 		        screen, window_size, window_position, viewport, no_viewport, device_scale_factor
 		"""
 
-		display_size = get_display_size()
-		force_remote_headful = bool(self.cdp_url and not self.is_local)
-		# Remote CDP sessions (e.g. selenium/standalone-chrome) expose a headful display
-		# even when local display detection fails, so treat them as screen-available.
-		has_screen_available = bool(display_size) or force_remote_headful
-		self.screen = self.screen or display_size or ViewportSize(width=1920, height=1080)
+                display_size = get_display_size()
+                force_remote_headful = bool(self.cdp_url and not self.is_local)
+                # Remote CDP sessions (e.g. selenium/standalone-chrome) expose a headful display
+                # even when local display detection fails, so treat them as screen-available.
+                has_screen_available = bool(display_size) or force_remote_headful
+                detected_screen = self.screen or display_size or ViewportSize(width=1920, height=1080)
+                self.screen = detected_screen
+                self._detected_screen = detected_screen
 
 
 		# Prefer headful mode for remote sessions and when a display is available by default
@@ -1090,23 +1104,23 @@ async function initialize(checkInitialized, magic) {{
 			self.no_viewport = False
 		else:
 			# Headful mode: respect user's viewport preference
-			if not user_provided_window_size:
-				# Default behaviour should maximise the window to fill the display.
-				# When Chrome receives an explicit --window-size argument it will
-				# use that resolution even if it is smaller than the available
-				# display, which caused the visible gap on wide screens. By leaving
-				# window_size unset we allow the default --start-maximized flag to
-				# take effect so the browser fills all available space. Only keep
-				# window_size when a user explicitly configured it or when no
-				# display is detected (e.g. virtual display fallback).
-				if has_screen_available:
-					self.window_size = None
-				else:
-					self.window_size = ViewportSize(width=1920, height=1080)
+                        if not user_provided_window_size:
+                                # Default behaviour should maximise the window to fill the display.
+                                # When Chrome receives an explicit --window-size argument it will
+                                # use that resolution even if it is smaller than the available
+                                # display, which caused the visible gap on wide screens. By leaving
+                                # window_size unset we allow the default --start-maximized flag to
+                                # take effect so the browser fills all available space. Only keep
+                                # window_size when a user explicitly configured it or when no
+                                # display is detected (e.g. virtual display fallback).
+                                if has_screen_available:
+                                        self.window_size = None
+                                else:
+                                        self.window_size = ViewportSize(width=1920, height=1080)
 
-			if user_provided_viewport:
-				# User explicitly set viewport - enable viewport mode
-				self.no_viewport = False
+                        if user_provided_viewport:
+                                # User explicitly set viewport - enable viewport mode
+                                self.no_viewport = False
 			else:
 				# Default headful: content fits to window (no viewport)
 				self.no_viewport = True if self.no_viewport is None else self.no_viewport
@@ -1118,10 +1132,10 @@ async function initialize(checkInitialized, magic) {{
 		# Finalize configuration
 		if self.no_viewport:
 			# No viewport mode: content adapts to window
-			self.viewport = None
-			self.device_scale_factor = None
-			self.screen = None
-			assert self.viewport is None
+                        self.viewport = None
+                        self.device_scale_factor = None
+                        self.screen = None
+                        assert self.viewport is None
 			assert self.no_viewport is True
 		else:
 			# Viewport mode: ensure viewport is set

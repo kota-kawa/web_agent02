@@ -38,7 +38,7 @@ from browser_use.browser.events import (
 	TabClosedEvent,
 	TabCreatedEvent,
 )
-from browser_use.browser.profile import BrowserProfile, ProxySettings
+from browser_use.browser.profile import BrowserProfile, ProxySettings, ViewportSize
 from browser_use.browser.views import BrowserStateSummary, TabInfo
 from browser_use.dom.views import EnhancedDOMTreeNode, TargetInfo
 from browser_use.observability import observe_debug
@@ -1505,13 +1505,21 @@ class BrowserSession(BaseModel):
 		if window_id is None:
 			return
 
-		if fullscreen_state not in {'fullscreen', 'maximized'}:
-			screen = self.browser_profile.screen
-			if screen:
-				try:
-					await self._cdp_client_root.send.Browser.setWindowBounds(
-						params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
-					)
+                if fullscreen_state not in {'fullscreen', 'maximized'}:
+                        screen = self.browser_profile.screen
+                        if screen is None:
+                                screen = getattr(self.browser_profile, '_detected_screen', None)
+                        if screen is None:
+                                screen = self.browser_profile.window_size
+                        if screen is None:
+                                screen = self.browser_profile.viewport
+                        if screen is None:
+                                screen = ViewportSize(width=1920, height=1080)
+                        if screen:
+                                try:
+                                        await self._cdp_client_root.send.Browser.setWindowBounds(
+                                                params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
+                                        )
 					fullscreen_state = await self._get_window_state_for_id(window_id)
 				except Exception as size_error:
 					self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
