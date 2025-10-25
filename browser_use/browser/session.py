@@ -103,8 +103,8 @@ class CDPSession(BaseModel):
 
 	target_id: TargetID
 	session_id: SessionID
-        title: str = 'Unknown title'
-        url: str = DEFAULT_NEW_TAB_URL
+	title: str = 'Unknown title'
+	url: str = DEFAULT_NEW_TAB_URL
 
 	# Track if this session owns its CDP client (for cleanup)
 	owns_cdp_client: bool = False
@@ -641,15 +641,15 @@ class BrowserSession(BaseModel):
 		target_id = None
 
 		# If new_tab=True but we're already in a new tab, set new_tab=False
-                if event.new_tab:
-                        try:
-                                current_url = await self.get_current_page_url()
+		if event.new_tab:
+			try:
+				current_url = await self.get_current_page_url()
 
-                                if is_new_tab_page(current_url):
-                                        self.logger.debug(f'[on_NavigateToUrlEvent] Already in new tab ({current_url}), setting new_tab=False')
-                                        event.new_tab = False
-                        except Exception as e:
-                                self.logger.debug(f'[on_NavigateToUrlEvent] Could not check current URL: {e}')
+				if is_new_tab_page(current_url):
+					self.logger.debug(f'[on_NavigateToUrlEvent] Already in new tab ({current_url}), setting new_tab=False')
+					event.new_tab = False
+			except Exception as e:
+				self.logger.debug(f'[on_NavigateToUrlEvent] Could not check current URL: {e}')
 
 		# check if the url is already open in a tab somewhere that we're not currently on, if so, short-circuit and just switch to it
 		targets = await self._cdp_get_all_pages()
@@ -664,44 +664,44 @@ class BrowserSession(BaseModel):
 
 			self.logger.debug(f'[on_NavigateToUrlEvent] Processing new_tab={event.new_tab}')
 			if event.new_tab:
-                                # Look for existing default start page tab that's not the current one
-                                targets = await self._cdp_get_all_pages()
-                                self.logger.debug(f'[on_NavigateToUrlEvent] Found {len(targets)} existing tabs')
-                                current_target_id = self.agent_focus.target_id if self.agent_focus else None
-                                self.logger.debug(f'[on_NavigateToUrlEvent] Current target_id: {current_target_id}')
+				# Look for existing default start page tab that's not the current one
+				targets = await self._cdp_get_all_pages()
+				self.logger.debug(f'[on_NavigateToUrlEvent] Found {len(targets)} existing tabs')
+				current_target_id = self.agent_focus.target_id if self.agent_focus else None
+				self.logger.debug(f'[on_NavigateToUrlEvent] Current target_id: {current_target_id}')
 
-                                for idx, target in enumerate(targets):
-                                        self.logger.debug(
-                                                f'[on_NavigateToUrlEvent] Tab {idx}: url={target.get("url")}, targetId={target["targetId"]}'
-                                        )
-                                        if (
-                                                is_new_tab_page(target.get('url'))
-                                                and target['targetId'] != current_target_id
-                                        ):
-                                                target_id = target['targetId']
-                                                self.logger.debug(
-                                                        f"Reusing existing default start page tab #{target_id[-4:]}"
-                                                )
-                                                break
+				for idx, target in enumerate(targets):
+					self.logger.debug(
+						f'[on_NavigateToUrlEvent] Tab {idx}: url={target.get("url")}, targetId={target["targetId"]}'
+					)
+					if (
+						is_new_tab_page(target.get('url'))
+						and target['targetId'] != current_target_id
+					):
+						target_id = target['targetId']
+						self.logger.debug(
+							f"Reusing existing default start page tab #{target_id[-4:]}"
+						)
+						break
 
-                                # Create new tab if no reusable one found
-                                if not target_id:
-                                        self.logger.debug('[on_NavigateToUrlEvent] No reusable start page tab found, creating new tab...')
-                                        try:
-                                                target_id = await self._cdp_create_new_page(DEFAULT_NEW_TAB_URL)
-                                                self.logger.debug(f'[on_NavigateToUrlEvent] Created new page with target_id: {target_id}')
-                                                targets = await self._cdp_get_all_pages()
+				# Create new tab if no reusable one found
+				if not target_id:
+					self.logger.debug('[on_NavigateToUrlEvent] No reusable start page tab found, creating new tab...')
+					try:
+						target_id = await self._cdp_create_new_page(DEFAULT_NEW_TAB_URL)
+						self.logger.debug(f'[on_NavigateToUrlEvent] Created new page with target_id: {target_id}')
+						targets = await self._cdp_get_all_pages()
 
-                                                self.logger.debug(f'Created new tab #{target_id[-4:]}')
-                                                # Dispatch TabCreatedEvent for new tab
-                                                await self.event_bus.dispatch(
-                                                        TabCreatedEvent(target_id=target_id, url=DEFAULT_NEW_TAB_URL)
-                                                )
-                                        except Exception as e:
-                                                self.logger.error(f'[on_NavigateToUrlEvent] Failed to create new tab: {type(e).__name__}: {e}')
-                                                # Fall back to using current tab
-                                                target_id = self.agent_focus.target_id
-                                                self.logger.warning(f'[on_NavigateToUrlEvent] Falling back to current tab #{target_id[-4:]}')
+						self.logger.debug(f'Created new tab #{target_id[-4:]}')
+						# Dispatch TabCreatedEvent for new tab
+						await self.event_bus.dispatch(
+							TabCreatedEvent(target_id=target_id, url=DEFAULT_NEW_TAB_URL)
+						)
+					except Exception as e:
+						self.logger.error(f'[on_NavigateToUrlEvent] Failed to create new tab: {type(e).__name__}: {e}')
+						# Fall back to using current tab
+						target_id = self.agent_focus.target_id
+						self.logger.warning(f'[on_NavigateToUrlEvent] Falling back to current tab #{target_id[-4:]}')
 			else:
 				# Use current tab
 				target_id = target_id or self.agent_focus.target_id
@@ -750,12 +750,12 @@ class BrowserSession(BaseModel):
 					status=None,  # CDP doesn't provide status directly
 				)
 			)
-                        await self.event_bus.dispatch(
-                                AgentFocusChangedEvent(target_id=target_id, url=event.url)
-                        )  # do not await! AgentFocusChangedEvent calls SwitchTabEvent and it will deadlock, dispatch to enqueue and return
+			await self.event_bus.dispatch(
+				AgentFocusChangedEvent(target_id=target_id, url=event.url)
+			)  # do not await! AgentFocusChangedEvent calls SwitchTabEvent and it will deadlock, dispatch to enqueue and return
 
-                        if is_default_new_tab_url(event.url):
-                                await self._close_data_url_tabs(exclude_target_id=target_id)
+			if is_default_new_tab_url(event.url):
+				await self._close_data_url_tabs(exclude_target_id=target_id)
 
 			# Note: These should be handled by dedicated watchdogs:
 			# - Security checks (security_watchdog)
@@ -791,13 +791,13 @@ class BrowserSession(BaseModel):
 			else:
 				# no pages open at all, create a new one (handles switching to it automatically)
 				assert self._cdp_client_root is not None, 'CDP client root not initialized - browser may not be connected yet'
-                                new_target = await self._cdp_client_root.send.Target.createTarget(
-                                        params={'url': DEFAULT_NEW_TAB_URL}
-                                )
-                                target_id = new_target['targetId']
-                                # do not await! these may circularly trigger SwitchTabEvent and could deadlock, dispatch to enqueue and return
-                                self.event_bus.dispatch(TabCreatedEvent(url=DEFAULT_NEW_TAB_URL, target_id=target_id))
-                                self.event_bus.dispatch(AgentFocusChangedEvent(target_id=target_id, url=DEFAULT_NEW_TAB_URL))
+				new_target = await self._cdp_client_root.send.Target.createTarget(
+					params={'url': DEFAULT_NEW_TAB_URL}
+				)
+				target_id = new_target['targetId']
+				# do not await! these may circularly trigger SwitchTabEvent and could deadlock, dispatch to enqueue and return
+				self.event_bus.dispatch(TabCreatedEvent(url=DEFAULT_NEW_TAB_URL, target_id=target_id))
+				self.event_bus.dispatch(AgentFocusChangedEvent(target_id=target_id, url=DEFAULT_NEW_TAB_URL))
 				return target_id
 
 		# switch to the target
@@ -1289,47 +1289,47 @@ class BrowserSession(BaseModel):
 				)
 			]
 
-                        # Check for chrome://newtab pages and immediately redirect them
-                        # to the default start page to avoid JS issues from CDP on chrome://* urls
-                        # Collect all targets that need redirection
-                        redirected_targets = []
+			# Check for chrome://newtab pages and immediately redirect them
+			# to the default start page to avoid JS issues from CDP on chrome://* urls
+			# Collect all targets that need redirection
+			redirected_targets = []
 			redirect_sessions = {}  # Store sessions created for redirection to potentially reuse
 			for target in page_targets:
 				target_url = target.get('url', '')
-                                if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
-                                        # Redirect chrome://newtab to the default start page to avoid JS issues preventing driving chrome://newtab
-                                        target_id = target['targetId']
-                                        self.logger.debug(
-                                                f'🔄 Redirecting {target_url} to {DEFAULT_NEW_TAB_URL} for target {target_id}'
-                                        )
-                                        try:
+				if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
+					# Redirect chrome://newtab to the default start page to avoid JS issues preventing driving chrome://newtab
+					target_id = target['targetId']
+					self.logger.debug(
+						f'🔄 Redirecting {target_url} to {DEFAULT_NEW_TAB_URL} for target {target_id}'
+					)
+					try:
 						# Create a CDP session for redirection (minimal domains to avoid duplicate event handlers)
 						# Only enable Page domain for navigation, avoid duplicate event handlers
 						redirect_session = await CDPSession.for_target(self._cdp_client_root, target_id, domains=['Page'])
 						# Navigate to about:blank
-                                                await redirect_session.cdp_client.send.Page.navigate(
-                                                        params={'url': DEFAULT_NEW_TAB_URL}, session_id=redirect_session.session_id
-                                                )
+						await redirect_session.cdp_client.send.Page.navigate(
+							params={'url': DEFAULT_NEW_TAB_URL}, session_id=redirect_session.session_id
+						)
 						redirected_targets.append(target_id)
 						redirect_sessions[target_id] = redirect_session  # Store for potential reuse
 						# Update the target's URL in our list for later use
-                                                target['url'] = DEFAULT_NEW_TAB_URL
+						target['url'] = DEFAULT_NEW_TAB_URL
 						# Small delay to ensure navigation completes
 						await asyncio.sleep(0.05)
 					except Exception as e:
-                                                self.logger.warning(f'Failed to redirect {target_url} to {DEFAULT_NEW_TAB_URL}: {e}')
+						self.logger.warning(f'Failed to redirect {target_url} to {DEFAULT_NEW_TAB_URL}: {e}')
 
 			# Log summary of redirections
-                        if redirected_targets:
-                                self.logger.debug(
-                                        f'Redirected {len(redirected_targets)} chrome://newtab pages to {DEFAULT_NEW_TAB_URL}'
-                                )
+			if redirected_targets:
+				self.logger.debug(
+					f'Redirected {len(redirected_targets)} chrome://newtab pages to {DEFAULT_NEW_TAB_URL}'
+				)
 
 			if not page_targets:
 				# No pages found, create a new one
-                                new_target = await self._cdp_client_root.send.Target.createTarget(
-                                        params={'url': DEFAULT_NEW_TAB_URL}
-                                )
+				new_target = await self._cdp_client_root.send.Target.createTarget(
+					params={'url': DEFAULT_NEW_TAB_URL}
+				)
 				target_id = new_target['targetId']
 				self.logger.debug(f'📄 Created new blank page with target ID: {target_id}')
 			else:
@@ -1388,8 +1388,88 @@ class BrowserSession(BaseModel):
 
 		return self
 
+	def _should_apply_initial_window_state(self) -> bool:
+		"""Determine whether fullscreen requests should run for this session."""
+
+		preference = getattr(self.browser_profile, 'request_initial_window_state', None)
+		if preference is not None:
+			return bool(preference)
+
+		return bool(self.cdp_url and not self.is_local)
+
+	async def _get_window_state_for_id(self, window_id: int) -> str | None:
+		"""Return the current window state for the given window identifier."""
+
+		if not self._cdp_client_root:
+			return None
+
+		try:
+			bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
+				params={'windowId': window_id},
+			)
+		except Exception as bounds_error:
+			self.logger.debug(
+				'Unable to verify fullscreen window state: %s: %s',
+				type(bounds_error).__name__,
+				bounds_error,
+			)
+			return None
+
+		bounds_data = bounds.get('bounds') or {}
+		return (
+			bounds_data.get('windowState')
+			or bounds_data.get('window_state')
+			or bounds_data.get('state')
+		)
+
+	async def _set_window_state_for_target(
+		self,
+		target_id: TargetID,
+		desired_state: Literal['fullscreen', 'maximized'],
+	) -> tuple[int | None, str | None]:
+		"""Request a specific window state for the window hosting the given target."""
+
+		if not self._cdp_client_root:
+			return None, None
+
+		try:
+			window_info = await self._cdp_client_root.send.Browser.getWindowForTarget(
+				params={'targetId': target_id}
+			)
+		except Exception as error:
+			self.logger.debug(
+				'Unable to resolve window for fullscreen request: %s: %s',
+				type(error).__name__,
+				error,
+			)
+			return None, None
+
+		window_id = window_info.get('windowId') or window_info.get('window_id')
+		if window_id is None:
+			return None, None
+
+		try:
+			await self._cdp_client_root.send.Browser.setWindowBounds(
+				params={'windowId': window_id, 'bounds': {'windowState': desired_state}},
+			)
+			self.logger.debug('Requested %s window state via CDP', desired_state)
+		except Exception as error:
+			self.logger.debug(
+				'Unable to request %s window state via bounds: %s: %s',
+				desired_state,
+				type(error).__name__,
+				error,
+			)
+			return window_id, None
+
+		await asyncio.sleep(0.1)
+		return window_id, await self._get_window_state_for_id(window_id)
+
 	async def _apply_initial_window_state(self, target_id: TargetID | None) -> None:
 		"""Request fullscreen bounds for the first window when running headful."""
+
+		if not self._should_apply_initial_window_state():
+			return
 
 		if self.browser_profile.headless:
 			return
@@ -1400,154 +1480,69 @@ class BrowserSession(BaseModel):
 		if not target_id or not self._cdp_client_root:
 			return
 
+		# Give the newly created Chrome window a moment to finish rendering
+		# before we try to manipulate its bounds. This ensures the fullscreen
+		# (maximize) request happens roughly one second after the window
+		# becomes visible, matching the desired behaviour of clicking the
+		# fullscreen toolbar button after the browser appears.
+		await asyncio.sleep(1.0)
+
 		window_id: int | None = None
-		try:
-			window_info = await self._cdp_client_root.send.Browser.getWindowForTarget(
-				params={'targetId': target_id}
-			)
-			window_id = window_info.get('windowId') or window_info.get('window_id')
-		except Exception as e:
-			self.logger.debug(
-				'Unable to resolve window for fullscreen request: %s: %s',
-				type(e).__name__,
-				e,
-			)
-			return
-
-                if window_id is None:
-                        return
-
-                # Give the newly created Chrome window a moment to finish rendering
-                # before we try to manipulate its bounds. This ensures the fullscreen
-                # (maximize) request happens roughly one second after the window
-                # becomes visible, matching the desired behaviour of clicking the
-                # fullscreen toolbar button after the browser appears.
-                await asyncio.sleep(1.0)
-
-                async def _get_window_state() -> str | None:
-                        try:
-                                bounds = await self._cdp_client_root.send.Browser.getWindowBounds(
-                                        params={'windowId': window_id},
-				)
-			except Exception as bounds_error:
-				self.logger.debug(
-					'Unable to verify fullscreen window state: %s: %s',
-					type(bounds_error).__name__,
-					bounds_error,
-				)
-				return None
-
-			bounds_data = bounds.get('bounds') or {}
-			return (
-				bounds_data.get('windowState')
-				or bounds_data.get('window_state')
-				or bounds_data.get('state')
-			)
-
-
-                async def _set_window_state(desired_state: str) -> str | None:
-                        try:
-                                await self._cdp_client_root.send.Browser.setWindowBounds(
-                                        params={'windowId': window_id, 'bounds': {'windowState': desired_state}},
-                                )
-				self.logger.debug('Requested %s window state via CDP', desired_state)
-			except Exception as e:
-				self.logger.debug(
-					'Unable to request %s window state via bounds: %s: %s',
-					desired_state,
-					type(e).__name__,
-					e,
-				)
-				return None
-
-			await asyncio.sleep(0.1)
-			return await _get_window_state()
-
-
 		fullscreen_state: str | None = None
 
 		for desired_state in ('fullscreen', 'maximized'):
-			for attempt in range(3):
-				fullscreen_state = await _set_window_state(desired_state)
+			for _ in range(3):
+				window_id, fullscreen_state = await self._set_window_state_for_target(target_id, desired_state)
+				if window_id is None:
+					return
 				if fullscreen_state == desired_state:
 					break
 				await asyncio.sleep(0.2)
 			if fullscreen_state == desired_state:
 				break
 
+		if window_id is None:
+			return
+
 		if fullscreen_state not in {'fullscreen', 'maximized'}:
 			screen = self.browser_profile.screen
 			if screen:
 				try:
-                                        await self._cdp_client_root.send.Browser.setWindowBounds(
-                                                params={
-                                                        'windowId': window_id,
-                                                        'bounds': {
-                                                                'windowState': 'normal',
-                                                                'left': 0,
-                                                                'top': 0,
-                                                                'width': screen.width,
-                                                                'height': screen.height,
-                                                        },
-                                                },
-                                        )
-					fullscreen_state = await _get_window_state()
-				except Exception as size_error:
-					self.logger.debug(
-						'Unable to set explicit fullscreen bounds: %s: %s',
-						type(size_error).__name__,
-						size_error,
+					await self._cdp_client_root.send.Browser.setWindowBounds(
+						params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
 					)
+					fullscreen_state = await self._get_window_state_for_id(window_id)
+				except Exception as size_error:
+					self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
 
 		if fullscreen_state not in {'fullscreen', 'maximized'}:
+			screen = self.browser_profile.screen
+			if screen:
+				screen.height = max(screen.height, 720)  # type: ignore[misc]
+				screen.width = max(screen.width, 1280)  # type: ignore[misc]
 			session = self.agent_focus
 			if session:
 				try:
 					await asyncio.sleep(0.25)
-					await self._cdp_client_root.send.Browser.bringToFront(
-						params={'windowId': window_id}
-					)
+					await self._cdp_client_root.send.Browser.bringToFront(params={'windowId': window_id})
 				except Exception as bring_to_front_error:
-					self.logger.debug(
-						'Unable to bring window to front before fullscreen key events: %s: %s',
-						type(bring_to_front_error).__name__,
-						bring_to_front_error,
-					)
+					self.logger.debug('Unable to bring window to front before fullscreen key events: %s: %s', type(bring_to_front_error).__name__, bring_to_front_error)
 				try:
 					await session.cdp_client.send.Page.bringToFront(session_id=session.session_id)
 				except Exception as page_front_error:
-					self.logger.debug(
-						'Unable to request Page.bringToFront before fullscreen key events: %s: %s',
-						type(page_front_error).__name__,
-						page_front_error,
-					)
+					self.logger.debug('Unable to request Page.bringToFront before fullscreen key events: %s: %s', type(page_front_error).__name__, page_front_error)
 				try:
-					key_payload = {
-						'key': 'F11',
-						'code': 'F11',
-						'windowsVirtualKeyCode': 122,
-						'nativeVirtualKeyCode': 122,
-					}
+					key_payload = {'key': 'F11', 'code': 'F11', 'windowsVirtualKeyCode': 122, 'nativeVirtualKeyCode': 122}
 					for event_type in ('rawKeyDown', 'keyDown'):
-						await session.cdp_client.send.Input.dispatchKeyEvent(
-							params={'type': event_type, **key_payload},
-							session_id=session.session_id,
-						)
-					await session.cdp_client.send.Input.dispatchKeyEvent(
-							params={'type': 'keyUp', **key_payload},
-							session_id=session.session_id,
-						)
+						await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': event_type, **key_payload}, session_id=session.session_id)
+					await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': 'keyUp', **key_payload}, session_id=session.session_id)
 					self.logger.debug('Dispatched F11 key events to request fullscreen')
 					await asyncio.sleep(0.3)
-					fullscreen_state = await _get_window_state()
+					fullscreen_state = await self._get_window_state_for_id(window_id)
 					if fullscreen_state not in {'fullscreen', 'maximized'}:
-						fullscreen_state = await _set_window_state('maximized')
+						_, fullscreen_state = await self._set_window_state_for_target(target_id, 'maximized')
 				except Exception as key_error:
-					self.logger.debug(
-						'Unable to dispatch fullscreen key events: %s: %s',
-						type(key_error).__name__,
-						key_error,
-					)
+					self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
 
 		self._fullscreen_requested = True
 
@@ -1775,12 +1770,12 @@ class BrowserSession(BaseModel):
 				return target
 		return None
 
-        async def get_current_page_url(self) -> str:
-                """Get the URL of the current page using CDP."""
-                target = await self.get_current_target_info()
-                if target:
-                        return target.get('url', '')
-                return DEFAULT_NEW_TAB_URL
+	async def get_current_page_url(self) -> str:
+		"""Get the URL of the current page using CDP."""
+		target = await self.get_current_target_info()
+		if target:
+			return target.get('url', '')
+		return DEFAULT_NEW_TAB_URL
 
 	async def get_current_page_title(self) -> str:
 		"""Get the title of the current page using CDP."""
@@ -1951,11 +1946,11 @@ class BrowserSession(BaseModel):
 		except Exception as e:
 			self.logger.warning(f'Failed to remove highlights: {e}')
 
-        async def _close_extension_options_pages(self) -> None:
-                """Close any extension options/welcome pages that have opened."""
-                try:
-                        # Get all open pages
-                        targets = await self._cdp_get_all_pages()
+	async def _close_extension_options_pages(self) -> None:
+		"""Close any extension options/welcome pages that have opened."""
+		try:
+			# Get all open pages
+			targets = await self._cdp_get_all_pages()
 
 			for target in targets:
 				target_url = target.get('url', '')
@@ -1971,37 +1966,37 @@ class BrowserSession(BaseModel):
 					except Exception as e:
 						self.logger.debug(f'[BrowserSession] Could not close extension page {target_id}: {e}')
 
-                except Exception as e:
-                        self.logger.debug(f'[BrowserSession] Error closing extension options pages: {e}')
+		except Exception as e:
+			self.logger.debug(f'[BrowserSession] Error closing extension options pages: {e}')
 
-        async def _close_data_url_tabs(self, exclude_target_id: TargetID | None = None) -> None:
-                """Close any remaining tabs that are still showing data URLs like ``data:,``."""
-                try:
-                        targets = await self._cdp_get_all_pages()
-                        for target in targets:
-                                target_id = target.get('targetId')
-                                if not target_id or target_id == exclude_target_id:
-                                        continue
+	async def _close_data_url_tabs(self, exclude_target_id: TargetID | None = None) -> None:
+		"""Close any remaining tabs that are still showing data URLs like ``data:,``."""
+		try:
+			targets = await self._cdp_get_all_pages()
+			for target in targets:
+				target_id = target.get('targetId')
+				if not target_id or target_id == exclude_target_id:
+					continue
 
-                                target_url = (target.get('url') or '').strip().lower()
-                                if not target_url.startswith('data:'):
-                                        continue
+				target_url = (target.get('url') or '').strip().lower()
+				if not target_url.startswith('data:'):
+					continue
 
-                                try:
-                                        self.logger.debug(
-                                                f"[BrowserSession] Closing data URL tab {target_id[-4:]} ({target.get('url')})"
-                                        )
-                                        await self._cdp_close_page(target_id)
-                                        await self.event_bus.dispatch(TabClosedEvent(target_id=target_id))
-                                except Exception as close_error:
-                                        self.logger.debug(
-                                                f"[BrowserSession] Could not close data URL tab {target_id[-4:]}: {close_error}"
-                                        )
-                except Exception as fetch_error:
-                        self.logger.debug(f'[BrowserSession] Error while closing data URL tabs: {fetch_error}')
+				try:
+					self.logger.debug(
+						f"[BrowserSession] Closing data URL tab {target_id[-4:]} ({target.get('url')})"
+					)
+					await self._cdp_close_page(target_id)
+					await self.event_bus.dispatch(TabClosedEvent(target_id=target_id))
+				except Exception as close_error:
+					self.logger.debug(
+						f"[BrowserSession] Could not close data URL tab {target_id[-4:]}: {close_error}"
+					)
+		except Exception as fetch_error:
+			self.logger.debug(f'[BrowserSession] Error while closing data URL tabs: {fetch_error}')
 
-        @property
-        def downloaded_files(self) -> list[str]:
+	@property
+	def downloaded_files(self) -> list[str]:
 		"""Get list of files downloaded during this browser session.
 
 		Returns:
@@ -2044,9 +2039,9 @@ class BrowserSession(BaseModel):
 			)
 		]
 
-        async def _cdp_create_new_page(
-                self, url: str = DEFAULT_NEW_TAB_URL, background: bool = False, new_window: bool = False
-        ) -> str:
+	async def _cdp_create_new_page(
+		self, url: str = DEFAULT_NEW_TAB_URL, background: bool = False, new_window: bool = False
+	) -> str:
 		"""Create a new page/tab using CDP Target.createTarget. Returns target ID."""
 		# Use the root CDP client to create tabs at the browser level
 		if self._cdp_client_root:
@@ -2295,8 +2290,8 @@ class BrowserSession(BaseModel):
 
 		# Always allow new tab pages (chrome://new-tab-page/, chrome://newtab/, about:blank)
 		# so they can be redirected to about:blank in connect()
-                if is_new_tab_page(url):
-                        url_allowed = True
+		if is_new_tab_page(url):
+			url_allowed = True
 
 		if url.startswith('chrome-error://') and include_chrome_error:
 			url_allowed = True

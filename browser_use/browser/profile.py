@@ -584,6 +584,14 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 		default=None,
 		description='Browser window size to use when headless=False.',
 	)
+	request_initial_window_state: bool | None = Field(
+		default=None,
+		description=(
+			'When True, request a fullscreen or maximized window via CDP after the first '
+			'session attaches. When False, skip the request. When None, the session will '
+			'enable the request automatically when connecting to a remote CDP endpoint.'
+		),
+	)
 	window_height: int | None = Field(default=None, description='DEPRECATED, use window_size["height"] instead', exclude=True)
 	window_width: int | None = Field(default=None, description='DEPRECATED, use window_size["width"] instead', exclude=True)
 	window_position: ViewportSize | None = Field(
