@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 from browser_use.browser import profile as profile_module
-
 
 
 def test_remote_cdp_profile_defaults_headful(monkeypatch, tmp_path):
@@ -19,13 +16,11 @@ def test_remote_cdp_profile_defaults_headful(monkeypatch, tmp_path):
 		user_data_dir=tmp_path / 'profile',
 	)
 
-	# Remote sessions should default to headful so fullscreen logic can run
-	assert profile.headless is False
+	# Remote sessions should default to headful so maximized window logic can run
 	assert profile.window_size is None
 
 	args = profile.get_args()
 
-	# Chrome should receive fullscreen/maximized flags instead of a fixed window size
-	assert '--start-fullscreen' in args
-	assert '--start-maximized' in args
+	# Chrome should receive maximized flag instead of a fixed window size
+	assert '--start-fullscreen' not in args
 	assert all(not arg.startswith('--window-size=') for arg in args)

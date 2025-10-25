@@ -750,15 +750,15 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			*(CHROME_HEADLESS_ARGS if self.headless else []),
 			*(CHROME_DISABLE_SECURITY_ARGS if self.disable_security else []),
 			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.deterministic_rendering else []),
-                        *(
-                                [f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
-                                if self.window_size
-                                else (
-                                        ['--start-maximized', '--start-fullscreen']
-                                        if not self.headless
-                                        else []
-                                )
-                        ),
+			*(
+				[f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
+				if self.window_size
+				else (
+					['--start-maximized']
+					if (not self.headless or (self.cdp_url and not self.is_local))
+					else []
+				)
+			),
 			*(
 				[f'--window-position={self.window_position["width"]},{self.window_position["height"]}']
 				if self.window_position
@@ -1063,8 +1063,11 @@ async function initialize(checkInitialized, magic) {{
 		has_screen_available = bool(display_size) or force_remote_headful
 		self.screen = self.screen or display_size or ViewportSize(width=1920, height=1080)
 
-		# if no headless preference specified, prefer headful if there is a display available
-		if self.headless is None:
+
+		# Prefer headful mode for remote sessions and when a display is available by default
+		if force_remote_headful:
+			self.headless = False
+		elif self.headless is None:
 			self.headless = not has_screen_available
 
 		# Determine viewport behavior based on mode and user preferences
@@ -1080,13 +1083,12 @@ async function initialize(checkInitialized, magic) {{
 		else:
 			# Headful mode: respect user's viewport preference
 			if not user_provided_window_size:
-                                # Default behaviour should maximise the window to fill the display
-                                # and request fullscreen. When Chrome receives an explicit
-                                # --window-size argument it will use that resolution even if it is
-                                # smaller than the available display, which caused the visible gap
-                                # on wide screens. By leaving window_size unset we allow the default
-                                # --start-maximized and --start-fullscreen flags to take effect and
-                                # the browser fills all available space. Only keep
+				# Default behaviour should maximise the window to fill the display.
+				# When Chrome receives an explicit --window-size argument it will
+				# use that resolution even if it is smaller than the available
+				# display, which caused the visible gap on wide screens. By leaving
+				# window_size unset we allow the default --start-maximized flag to
+				# take effect so the browser fills all available space. Only keep
 				# window_size when a user explicitly configured it or when no
 				# display is detected (e.g. virtual display fallback).
 				if has_screen_available:
