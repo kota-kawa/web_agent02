@@ -387,6 +387,7 @@ class BrowserSession(BaseModel):
 	_recording_watchdog: Any | None = PrivateAttr(default=None)
 
         _initial_window_state_applied: bool = PrivateAttr(default=False)
+        _fullscreen_requested: bool = PrivateAttr(default=False)
 
 	_logger: Any = PrivateAttr(default=None)
 
@@ -455,6 +456,7 @@ class BrowserSession(BaseModel):
 		self._permissions_watchdog = None
                 self._recording_watchdog = None
                 self._initial_window_state_applied = False
+                self._fullscreen_requested = False
 
 		if hasattr(self, '_watchdogs_attached'):
 			self._watchdogs_attached = False
@@ -1481,80 +1483,88 @@ class BrowserSession(BaseModel):
 		if not target_id or not self._cdp_client_root:
 			return
 
-		# Give the newly created Chrome window a moment to finish rendering
-		# before we try to manipulate its bounds. This ensures the fullscreen
-		# (maximize) request happens roughly one second after the window
-		# becomes visible, matching the desired behaviour of clicking the
-		# fullscreen toolbar button after the browser appears.
-		await asyncio.sleep(1.0)
+                successfully_requested = False
+                self._fullscreen_requested = True
 
-		window_id: int | None = None
-		fullscreen_state: str | None = None
+                try:
+                        # Give the newly created Chrome window a moment to finish rendering
+                        # before we try to manipulate its bounds. This ensures the fullscreen
+                        # (maximize) request happens roughly one second after the window
+                        # becomes visible, matching the desired behaviour of clicking the
+                        # fullscreen toolbar button after the browser appears.
+                        await asyncio.sleep(1.0)
 
-		for desired_state in ('fullscreen', 'maximized'):
-			for _ in range(3):
-				window_id, fullscreen_state = await self._set_window_state_for_target(target_id, desired_state)
-				if window_id is None:
-					return
-				if fullscreen_state == desired_state:
-					break
-				await asyncio.sleep(0.2)
-			if fullscreen_state == desired_state:
-				break
+                        window_id: int | None = None
+                        fullscreen_state: str | None = None
 
-		if window_id is None:
-			return
+                        for desired_state in ('fullscreen', 'maximized'):
+                                for _ in range(3):
+                                        window_id, fullscreen_state = await self._set_window_state_for_target(target_id, desired_state)
+                                        if window_id is None:
+                                                return
+                                        if fullscreen_state == desired_state:
+                                                break
+                                        await asyncio.sleep(0.2)
+                                if fullscreen_state == desired_state:
+                                        break
 
-                if fullscreen_state not in {'fullscreen', 'maximized'}:
-                        screen = self.browser_profile.screen
-                        if screen is None:
-                                screen = getattr(self.browser_profile, '_detected_screen', None)
-                        if screen is None:
-                                screen = self.browser_profile.window_size
-                        if screen is None:
-                                screen = self.browser_profile.viewport
-                        if screen is None:
-                                screen = ViewportSize(width=1920, height=1080)
-                        if screen:
-                                try:
-                                        await self._cdp_client_root.send.Browser.setWindowBounds(
-                                                params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
-                                        )
-					fullscreen_state = await self._get_window_state_for_id(window_id)
-				except Exception as size_error:
-					self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
+                        if window_id is None:
+                                return
 
-		if fullscreen_state not in {'fullscreen', 'maximized'}:
-			screen = self.browser_profile.screen
-			if screen:
-				screen.height = max(screen.height, 720)  # type: ignore[misc]
-				screen.width = max(screen.width, 1280)  # type: ignore[misc]
-			session = self.agent_focus
-			if session:
-				try:
-					await asyncio.sleep(0.25)
-					await self._cdp_client_root.send.Browser.bringToFront(params={'windowId': window_id})
-				except Exception as bring_to_front_error:
-					self.logger.debug('Unable to bring window to front before fullscreen key events: %s: %s', type(bring_to_front_error).__name__, bring_to_front_error)
-				try:
-					await session.cdp_client.send.Page.bringToFront(session_id=session.session_id)
-				except Exception as page_front_error:
-					self.logger.debug('Unable to request Page.bringToFront before fullscreen key events: %s: %s', type(page_front_error).__name__, page_front_error)
-				try:
-					key_payload = {'key': 'F11', 'code': 'F11', 'windowsVirtualKeyCode': 122, 'nativeVirtualKeyCode': 122}
-					for event_type in ('rawKeyDown', 'keyDown'):
-						await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': event_type, **key_payload}, session_id=session.session_id)
-					await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': 'keyUp', **key_payload}, session_id=session.session_id)
-					self.logger.debug('Dispatched F11 key events to request fullscreen')
-					await asyncio.sleep(0.3)
-					fullscreen_state = await self._get_window_state_for_id(window_id)
-					if fullscreen_state not in {'fullscreen', 'maximized'}:
-						_, fullscreen_state = await self._set_window_state_for_target(target_id, 'maximized')
-				except Exception as key_error:
-					self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
+                        if fullscreen_state not in {'fullscreen', 'maximized'}:
+                                screen = self.browser_profile.screen
+                                if screen is None:
+                                        screen = getattr(self.browser_profile, '_detected_screen', None)
+                                if screen is None:
+                                        screen = self.browser_profile.window_size
+                                if screen is None:
+                                        screen = self.browser_profile.viewport
+                                if screen is None:
+                                        screen = ViewportSize(width=1920, height=1080)
+                                if screen:
+                                        try:
+                                                await self._cdp_client_root.send.Browser.setWindowBounds(
+                                                        params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
+                                                )
+                                                fullscreen_state = await self._get_window_state_for_id(window_id)
+                                        except Exception as size_error:
+                                                self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
 
+                        if fullscreen_state not in {'fullscreen', 'maximized'}:
+                                screen = self.browser_profile.screen
+                                if screen:
+                                        screen.height = max(screen.height, 720)  # type: ignore[misc]
+                                        screen.width = max(screen.width, 1280)  # type: ignore[misc]
+                                session = self.agent_focus
+                                if session:
+                                        try:
+                                                await asyncio.sleep(0.25)
+                                                await self._cdp_client_root.send.Browser.bringToFront(params={'windowId': window_id})
+                                        except Exception as bring_to_front_error:
+                                                self.logger.debug('Unable to bring window to front before fullscreen key events: %s: %s', type(bring_to_front_error).__name__, bring_to_front_error)
+                                        try:
+                                                await session.cdp_client.send.Page.bringToFront(session_id=session.session_id)
+                                        except Exception as page_front_error:
+                                                self.logger.debug('Unable to request Page.bringToFront before fullscreen key events: %s: %s', type(page_front_error).__name__, page_front_error)
+                                        try:
+                                                key_payload = {'key': 'F11', 'code': 'F11', 'windowsVirtualKeyCode': 122, 'nativeVirtualKeyCode': 122}
+                                                for event_type in ('rawKeyDown', 'keyDown'):
+                                                        await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': event_type, **key_payload}, session_id=session.session_id)
+                                                await session.cdp_client.send.Input.dispatchKeyEvent(params={'type': 'keyUp', **key_payload}, session_id=session.session_id)
+                                                self.logger.debug('Dispatched F11 key events to request fullscreen')
+                                                await asyncio.sleep(0.3)
+                                                fullscreen_state = await self._get_window_state_for_id(window_id)
+                                                if fullscreen_state not in {'fullscreen', 'maximized'}:
+                                                        _, fullscreen_state = await self._set_window_state_for_target(target_id, 'maximized')
+                                        except Exception as key_error:
+                                                self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
 
-                self._initial_window_state_applied = True
+                        successfully_requested = fullscreen_state in {'fullscreen', 'maximized'}
+                finally:
+                        if not successfully_requested:
+                                self._fullscreen_requested = False
+
+                self._initial_window_state_applied = successfully_requested
 
 	async def _setup_proxy_auth(self) -> None:
 		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.
