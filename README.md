@@ -84,7 +84,7 @@ docker compose up --build
 
 Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false](http://localhost:7900/?autoconnect=1&resize=scale&scale=auto&view_clip=false) so the remote browser fills its frame immediately; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
 
-The browser pane will automatically enter fullscreen mode on your first click anywhere on the page, providing an immersive viewing experience. You can also manually toggle fullscreen at any time using the "全画面表示" (Fullscreen) button in the browser toolbar, or exit fullscreen by pressing the ESC key.
+The browser pane keeps the noVNC session within the dashboard so the remote Chrome window simply maximizes inside its frame. You can resize the entire browser pane by adjusting your browser window or updating the `EMBED_BROWSER_URL` environment variable if you need different scaling behaviour.
 
 Before starting the stack, copy `secrets.env.example` to `secrets.env` and add your Gemini/Google API key (either `GOOGLE_API_KEY` or the legacy `GEMINI_API_KEY`). Docker Compose now loads secrets from that file so the key is no longer baked into `docker-compose.yml`.
 
@@ -94,7 +94,7 @@ Once the stack is up you can:
 
 * place your API keys in a local `.env` file consumed by the Flask service;
 * set `BROWSER_USE_CDP_URL` when the CDP endpoint cannot be discovered automatically;
-* optionally set `BROWSER_WINDOW_WIDTH` / `BROWSER_WINDOW_HEIGHT` if you need the embedded Chrome window to use a specific resolution; otherwise it now launches fullscreen to fill the available display.
+* optionally set `BROWSER_WINDOW_WIDTH` / `BROWSER_WINDOW_HEIGHT` if you need the embedded Chrome window to use a specific resolution; otherwise it launches maximized to fill the available display.
 * adjust `AGENT_MAX_STEPS` to control how many reasoning steps the agent may take for each instruction.
 
 # Demos
