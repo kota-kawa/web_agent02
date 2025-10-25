@@ -1505,7 +1505,7 @@ class BrowserSession(BaseModel):
 		if window_id is None:
 			return
 
-                if fullscreen_state not in {'fullscreen', 'maximized'}:
+                def _get_desired_screen_size() -> ViewportSize:
                         screen = self.browser_profile.screen
                         if screen is None:
                                 screen = getattr(self.browser_profile, '_detected_screen', None)
@@ -1513,22 +1513,26 @@ class BrowserSession(BaseModel):
                                 screen = self.browser_profile.window_size
                         if screen is None:
                                 screen = self.browser_profile.viewport
-                        if screen is None:
+                        if screen is None or screen.width <= 0 or screen.height <= 0:
                                 screen = ViewportSize(width=1920, height=1080)
+                        return screen
+
+                if fullscreen_state not in {'fullscreen', 'maximized'}:
+                        screen = _get_desired_screen_size()
                         if screen:
                                 try:
                                         await self._cdp_client_root.send.Browser.setWindowBounds(
                                                 params={'windowId': window_id, 'bounds': {'windowState': 'normal', 'left': 0, 'top': 0, 'width': screen.width, 'height': screen.height}},
                                         )
-					fullscreen_state = await self._get_window_state_for_id(window_id)
-				except Exception as size_error:
-					self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
+                                        fullscreen_state = await self._get_window_state_for_id(window_id)
+                                except Exception as size_error:
+                                        self.logger.debug('Unable to set explicit fullscreen bounds: %s: %s', type(size_error).__name__, size_error)
 
-		if fullscreen_state not in {'fullscreen', 'maximized'}:
-			screen = self.browser_profile.screen
-			if screen:
-				screen.height = max(screen.height, 720)  # type: ignore[misc]
-				screen.width = max(screen.width, 1280)  # type: ignore[misc]
+                if fullscreen_state not in {'fullscreen', 'maximized'}:
+                        screen = self.browser_profile.screen
+                        if screen:
+                                screen.height = max(screen.height, 720)  # type: ignore[misc]
+                                screen.width = max(screen.width, 1280)  # type: ignore[misc]
 			session = self.agent_focus
 			if session:
 				try:
@@ -1550,13 +1554,61 @@ class BrowserSession(BaseModel):
 					fullscreen_state = await self._get_window_state_for_id(window_id)
 					if fullscreen_state not in {'fullscreen', 'maximized'}:
 						_, fullscreen_state = await self._set_window_state_for_target(target_id, 'maximized')
-				except Exception as key_error:
-					self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
+                                except Exception as key_error:
+                                        self.logger.debug('Unable to dispatch fullscreen key events: %s: %s', type(key_error).__name__, key_error)
 
+
+                # Some remote environments acknowledge a fullscreen/maximize request but
+                # still keep the Chrome window at a much smaller size. Inspect the current
+                # window bounds and explicitly resize the window if it is narrower than
+                # the desired screen width.
+                try:
+                        desired_screen = _get_desired_screen_size()
+                        bounds_response = await self._cdp_client_root.send.Browser.getWindowBounds(
+                                params={'windowId': window_id},
+                        )
+                        bounds = bounds_response.get('bounds') or {}
+                        current_width = bounds.get('width') or 0
+                        current_height = bounds.get('height') or 0
+                        # getWindowBounds returns width/height only for "normal" state. Force the
+                        # window to a specific size if the reported values are smaller than the
+                        # configured display.
+                        if current_width and current_height:
+                                resize_needed = current_width < desired_screen.width or current_height < desired_screen.height
+                        else:
+                                resize_needed = True
+                        if resize_needed:
+                                await self._cdp_client_root.send.Browser.setWindowBounds(
+                                        params={
+                                                'windowId': window_id,
+                                                'bounds': {
+                                                        'windowState': 'normal',
+                                                        'left': 0,
+                                                        'top': 0,
+                                                        'width': desired_screen.width,
+                                                        'height': desired_screen.height,
+                                                },
+                                        },
+                                )
+                                await asyncio.sleep(0.1)
+                                # Best effort: request maximized state again so the window occupies
+                                # the full virtual display after being resized.
+                                try:
+                                        await self._cdp_client_root.send.Browser.setWindowBounds(
+                                                params={'windowId': window_id, 'bounds': {'windowState': 'maximized'}},
+                                        )
+                                except Exception as maximize_error:
+                                        self.logger.debug(
+                                                'Unable to re-request maximized bounds after resize: %s: %s',
+                                                type(maximize_error).__name__,
+                                                maximize_error,
+                                        )
+                except Exception as bounds_error:
+                        self.logger.debug('Unable to enforce explicit window bounds: %s: %s', type(bounds_error).__name__, bounds_error)
 
                 self._initial_window_state_applied = True
 
-	async def _setup_proxy_auth(self) -> None:
+        async def _setup_proxy_auth(self) -> None:
 		"""Enable CDP Fetch auth handling for authenticated proxy, if credentials provided.
 
 		Handles HTTP proxy authentication challenges (Basic/Proxy) by providing
