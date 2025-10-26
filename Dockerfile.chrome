@@ -7,6 +7,19 @@ RUN apt-get update \
         xdotool \
     && rm -rf /var/lib/apt/lists/*
 
+# Apply the upstream noVNC fix for closing VideoFrame objects after
+# WebCodecs H.264 detection until a tagged release includes it.
+ARG NOVNC_PATCH_COMMIT=8edb3d282eb9ebb138b0f9a4baacb90bb4c4427e
+RUN set -eux; \
+    tmpdir="$(mktemp -d)"; \
+    wget -q -O "$tmpdir/noVNC.zip" "https://github.com/novnc/noVNC/archive/${NOVNC_PATCH_COMMIT}.zip"; \
+    unzip -q "$tmpdir/noVNC.zip" -d "$tmpdir"; \
+    patch_root="$tmpdir/noVNC-${NOVNC_PATCH_COMMIT}"; \
+    install -m 644 "${patch_root}/app/ui.js" /opt/selenium/noVNC/app/ui.js; \
+    install -m 644 "${patch_root}/core/util/browser.js" /opt/selenium/noVNC/core/util/browser.js; \
+    printf '1.6.0+frame-close-patch\n' > /opt/selenium/noVNC/VERSION; \
+    rm -rf "$tmpdir"
+
 COPY maximize.sh /opt/bin/maximize.sh
 RUN chmod +x /opt/bin/maximize.sh
 
