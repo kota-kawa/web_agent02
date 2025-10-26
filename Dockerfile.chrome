@@ -1,0 +1,14 @@
+FROM selenium/standalone-chrome:latest
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        wmctrl \
+        xdotool \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY maximize.sh /opt/bin/maximize.sh
+RUN chmod +x /opt/bin/maximize.sh
+
+USER seluser
+ENTRYPOINT ["/opt/bin/maximize.sh"]
