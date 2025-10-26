@@ -824,14 +824,18 @@ class BrowserAgentController:
         window_size: ViewportSize | None = None
         screen_size: ViewportSize | None = None
 
-        browser_window = _viewport_from_env('BROWSER_WINDOW_WIDTH', 'BROWSER_WINDOW_HEIGHT', 1920, 1080)
+        browser_window = _viewport_from_env(
+            'BROWSER_WINDOW_WIDTH',
+            'BROWSER_WINDOW_HEIGHT',
+            1920,
+            1080,
+        )
         if browser_window is not None:
             window_size = browser_window
             screen_size = browser_window
         else:
             selenium_window = _viewport_from_env('SE_SCREEN_WIDTH', 'SE_SCREEN_HEIGHT', 1920, 1080)
             if selenium_window is not None:
-                window_size = selenium_window
                 screen_size = selenium_window
 
         profile = BrowserProfile(
