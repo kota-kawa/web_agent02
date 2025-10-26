@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MAXIMIZE_ENABLED=${ENABLE_CHROME_MAXIMIZE:-1}
+WINDOW_TITLE=${CHROME_WINDOW_TITLE:-Chrom}
+MAX_RETRIES=${CHROME_MAXIMIZE_RETRIES:-60}
+SLEEP_SECONDS=${CHROME_MAXIMIZE_RETRY_INTERVAL:-1}
+
+if [[ "$MAXIMIZE_ENABLED" == "1" ]]; then
+    /opt/browseruse/bin/maximize_chrome.sh "$WINDOW_TITLE" "$MAX_RETRIES" "$SLEEP_SECONDS" &
+fi
+
+exec "$@"

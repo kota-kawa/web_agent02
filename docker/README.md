@@ -24,6 +24,7 @@ docker build -t browseruse .
   - `base-images/chromium/` - Adds Chromium browser
   - `base-images/python-deps/` - Adds Python dependencies
   - `build-base-images.sh` - Script to build all base images
+  - `base-images/chromium/standalone.Dockerfile` - Extends Selenium's Chrome image with automatic window maximization for VNC sessions
 
 ## Performance
 

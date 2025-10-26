@@ -82,7 +82,9 @@ This repository now includes a simple local dashboard that embeds a real browser
 docker compose up --build
 ```
 
-Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the `selenium/standalone-chrome` container via noVNC. The iframe source defaults to [http://localhost:7900/vnc_lite.html?autoconnect=1&resize=scale&scale=auto&view_clip=false](http://localhost:7900/vnc_lite.html?autoconnect=1&resize=scale&scale=auto&view_clip=false) so the remote browser fills its frame immediately without showing the fullscreen toolbar button; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
+Then open [http://localhost:5005](http://localhost:5005) in your browser. The layout reserves the left third of the screen for chat history and prompt input, while the right two-thirds embeds the Chromium instance exposed by the browser container via noVNC. The iframe source defaults to [http://localhost:7900/vnc_lite.html?autoconnect=1&resize=scale&scale=auto&view_clip=false](http://localhost:7900/vnc_lite.html?autoconnect=1&resize=scale&scale=auto&view_clip=false) so the remote browser fills its frame immediately without showing the fullscreen toolbar button; adjust the `EMBED_BROWSER_URL` environment variable in `docker-compose.yml` if you need to proxy or expose it differently.
+
+> 💡 The custom image defined in `docker/base-images/chromium/standalone.Dockerfile` installs `wmctrl` and runs a startup helper that waits for Fluxbox and maximizes the Chrome window as soon as it appears. Every VNC session now begins with a maximized browser, so you no longer need to pass `--start-maximized` flags via Selenium capabilities.
 
 The browser pane keeps the noVNC session within the dashboard so the remote Chrome window simply maximizes inside its frame. You can resize the entire browser pane by adjusting your browser window or updating the `EMBED_BROWSER_URL` environment variable if you need different scaling behaviour.
 

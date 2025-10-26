@@ -18,7 +18,9 @@ services:
       - multi_agent_network
 
   browser:
-    image: selenium/standalone-chrome:latest
+    build:
+      context: .
+      dockerfile: docker/base-images/chromium/standalone.Dockerfile
     shm_size: 2gb
     ports:
       - '4444:4444'
@@ -27,7 +29,6 @@ services:
       - SE_VNC_NO_PASSWORD=1
       - SE_SCREEN_WIDTH=1920
       - SE_SCREEN_HEIGHT=1080
-      - SE_NODE_OVERRIDE_CAPABILITIES={"browserName":"chrome","platformName":"linux","goog:chromeOptions":{"args":["--start-maximized"]}}
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:4444/status || exit 1']
       interval: 30s

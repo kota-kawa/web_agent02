@@ -770,15 +770,15 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 			*(CHROME_HEADLESS_ARGS if self.headless else []),
 			*(CHROME_DISABLE_SECURITY_ARGS if self.disable_security else []),
 			*(CHROME_DETERMINISTIC_RENDERING_ARGS if self.deterministic_rendering else []),
-			*(
-				[f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
-				if self.window_size
-				else (
-					['--start-maximized']
-					if (not self.headless or (self.cdp_url and not self.is_local))
-					else []
-				)
-			),
+                        *(
+                                [f'--window-size={self.window_size["width"]},{self.window_size["height"]}']
+                                if self.window_size
+                                else (
+                                        ['--start-maximized']
+                                        if (not self.headless and not (self.cdp_url and not self.is_local))
+                                        else []
+                                )
+                        ),
 			*(
 				[f'--window-position={self.window_position["width"]},{self.window_position["height"]}']
 				if self.window_position
@@ -1110,8 +1110,10 @@ async function initialize(checkInitialized, magic) {{
                                 # use that resolution even if it is smaller than the available
                                 # display, which caused the visible gap on wide screens. By leaving
                                 # window_size unset we allow the default --start-maximized flag to
-                                # take effect so the browser fills all available space. Only keep
-                                # window_size when a user explicitly configured it or when no
+                                # take effect for local sessions so the browser fills all available
+                                # space. Remote Selenium sessions rely on the Fluxbox + wmctrl helper
+                                # in docker/base-images/chromium to maximise the window once it appears.
+                                # Only keep window_size when a user explicitly configured it or when no
                                 # display is detected (e.g. virtual display fallback).
                                 if has_screen_available:
                                         self.window_size = None
