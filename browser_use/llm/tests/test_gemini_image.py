@@ -6,7 +6,6 @@ import random
 from PIL import Image, ImageDraw, ImageFont
 
 from browser_use.llm.google.chat import ChatGoogle
-from browser_use.llm.google.serializer import GoogleMessageSerializer
 from browser_use.llm.messages import (
 	BaseMessage,
 	ContentPartImageParam,
@@ -68,12 +67,7 @@ async def test_gemini_image_vision():
 		),
 	]
 
-	# Serialize messages for Google format
-	serializer = GoogleMessageSerializer()
-	formatted_messages, system_message = serializer.serialize_messages(messages)
-
-	print('Testing Gemini image vision...')
-	print(f'System message: {system_message}')
+        print('Testing Gemini image vision...')
 
 	# Make the API call
 	try:
