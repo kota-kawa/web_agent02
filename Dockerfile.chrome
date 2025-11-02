@@ -15,9 +15,9 @@ RUN set -eux; \
     wget -q -O "$tmpdir/noVNC.zip" "https://github.com/novnc/noVNC/archive/${NOVNC_PATCH_COMMIT}.zip"; \
     unzip -q "$tmpdir/noVNC.zip" -d "$tmpdir"; \
     patch_root="$tmpdir/noVNC-${NOVNC_PATCH_COMMIT}"; \
-    install -m 644 "${patch_root}/app/ui.js" /opt/selenium/noVNC/app/ui.js; \
-    install -m 644 "${patch_root}/core/util/browser.js" /opt/selenium/noVNC/core/util/browser.js; \
-    printf '1.6.0+frame-close-patch\n' > /opt/selenium/noVNC/VERSION; \
+    install -m 644 "${patch_root}/app/ui.js" /opt/bin/noVNC/app/ui.js; \
+    install -m 644 "${patch_root}/core/util/browser.js" /opt/bin/noVNC/core/util/browser.js; \
+    printf '1.6.0+frame-close-patch\n' > /opt/bin/noVNC/VERSION; \
     rm -rf "$tmpdir"
 
 COPY maximize.sh /opt/bin/maximize.sh
