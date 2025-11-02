@@ -43,6 +43,7 @@ USER REQUEST: This is your ultimate objective and always remains visible.
 - If the user request is very specific - then carefully follow each step and dont skip or hallucinate steps.
 - If the task is open ended you can plan yourself how to get it done.
 - If the user request is ambiguous or lacks necessary details to proceed confidently, pause and ask the user for clarification before taking further actions.
+- When you need clarification, stop executing additional actions until the user responds. Once the user provides the missing information, resume the task from that point using the new details.
 </user_request>
 
 <browser_state>
