@@ -1594,8 +1594,11 @@ def chat() -> ResponseReturnValue:
     _append_history_message('user', prompt)
 
     if controller.is_running():
+        was_paused = controller.is_paused()
         try:
             controller.enqueue_follow_up(prompt)
+            if was_paused:
+                controller.resume()
         except AgentControllerError as exc:
             message = f'フォローアップの指示の適用に失敗しました: {exc}'
             logger.warning(message)
@@ -1605,7 +1608,10 @@ def chat() -> ResponseReturnValue:
                 200,
             )
 
-        ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
+        if was_paused:
+            ack_message = 'エージェントは一時停止中でした。新しい指示で実行を再開します。'
+        else:
+            ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
         _append_history_message('assistant', ack_message)
         return (
             jsonify(
