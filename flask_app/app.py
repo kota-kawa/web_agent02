@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 from contextlib import suppress
@@ -1793,7 +1794,6 @@ JSON形式で回答してください。その他の説明は不要です。"""
         
         # Try to parse JSON from the response
         # Sometimes LLM wraps JSON in markdown code blocks
-        import re
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
             json_text = json_match.group(1)
@@ -1827,23 +1827,36 @@ JSON形式で回答してください。その他の説明は不要です。"""
             'task_description': None,
             'reason': f'LLMの応答をJSON形式で解析できませんでした: {exc}',
         }
-    except Exception as exc:  # noqa: BLE001
-        logger.exception('Failed to analyze conversation history')
+    except (ValueError, TypeError, AttributeError) as exc:
+        logger.warning('Error during conversation history analysis: %s', exc)
         return {
             'needs_action': False,
             'action_type': None,
             'task_description': None,
             'reason': f'会話履歴の分析中にエラーが発生しました: {exc}',
         }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Unexpected error during conversation history analysis')
+        return {
+            'needs_action': False,
+            'action_type': None,
+            'task_description': None,
+            'reason': f'予期しないエラーが発生しました: {exc}',
+        }
 
 
 def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
     """Synchronous wrapper for async conversation history analysis."""
-    loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(_analyze_conversation_history_async(conversation_history))
-    finally:
-        loop.close()
+        return asyncio.run(_analyze_conversation_history_async(conversation_history))
+    except RuntimeError as exc:
+        # Handle case where event loop is already running
+        logger.warning('Event loop already running, creating new loop: %s', exc)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_analyze_conversation_history_async(conversation_history))
+        finally:
+            loop.close()
 
 
 @app.post('/api/check-conversation-history')
@@ -1887,6 +1900,10 @@ def check_conversation_history() -> ResponseReturnValue:
             logger.warning('Failed to initialize agent controller: %s', exc)
             response_data['run_summary'] = f'エージェントの初期化に失敗しました: {exc}'
             return jsonify(response_data), 200
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning('System error while initializing agent controller: %s', exc)
+            response_data['run_summary'] = f'エージェントの初期化中にシステムエラーが発生しました: {exc}'
+            return jsonify(response_data), 200
         except Exception as exc:  # noqa: BLE001
             logger.exception('Unexpected error while initializing agent controller')
             response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
@@ -1915,6 +1932,9 @@ def check_conversation_history() -> ResponseReturnValue:
         except AgentControllerError as exc:
             logger.warning('Failed to execute browser agent task: %s', exc)
             response_data['run_summary'] = f'エージェントの実行に失敗しました: {exc}'
+        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+            logger.warning('System error during browser agent execution: %s', exc)
+            response_data['run_summary'] = f'エージェントの実行中にシステムエラーが発生しました: {exc}'
         except Exception as exc:  # noqa: BLE001
             logger.exception('Unexpected error while executing browser agent task')
             response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
