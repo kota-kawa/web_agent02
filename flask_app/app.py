@@ -1732,5 +1732,195 @@ def resume_agent() -> ResponseReturnValue:
     return jsonify({'status': 'resumed'}), 200
 
 
+async def _analyze_conversation_history_async(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Analyze conversation history using LLM to determine if browser operations are needed.
+    
+    Returns a dict with:
+    - needs_action: bool - whether browser operations are needed
+    - action_type: str - type of action (if needed)
+    - task_description: str - description of the task to perform (if needed)
+    - reason: str - explanation of the decision
+    """
+    try:
+        llm = _create_gemini_llm()
+    except AgentControllerError as exc:
+        logger.warning('Failed to create Gemini LLM for conversation analysis: %s', exc)
+        return {
+            'needs_action': False,
+            'action_type': None,
+            'task_description': None,
+            'reason': f'LLMの初期化に失敗しました: {exc}',
+        }
+    
+    # Format conversation history for analysis
+    conversation_text = ''
+    for msg in conversation_history:
+        role = msg.get('role', 'unknown')
+        content = msg.get('content', '')
+        conversation_text += f'{role}: {content}\n'
+    
+    # Create a prompt to analyze the conversation
+    analysis_prompt = f"""以下の会話履歴を分析して、問題が発生していてブラウザ操作で解決できそうかどうかを判断してください。
+
+会話履歴:
+{conversation_text}
+
+以下の条件に基づいて判断してください:
+1. ユーザーが困っている、またはエラーが発生している
+2. その問題がWebブラウザの操作（検索、ページ遷移、情報取得、フォーム入力など）で解決できる可能性がある
+3. 問題が明確で、具体的なタスクとして実行可能である
+
+結果を以下のJSON形式で出力してください:
+{{
+  "needs_action": true/false,
+  "action_type": "search" | "navigate" | "form_fill" | "data_extract" | null,
+  "task_description": "実行すべき具体的なタスクの説明（needs_actionがtrueの場合）",
+  "reason": "判断の理由"
+}}
+
+JSON形式で回答してください。その他の説明は不要です。"""
+    
+    try:
+        # Use LLM to generate structured analysis
+        from browser_use.llm.messages import BaseMessage
+        
+        messages = [BaseMessage(role='user', content=analysis_prompt)]
+        response = await llm.ainvoke(messages)
+        
+        # Extract JSON from response
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        # Try to parse JSON from the response
+        # Sometimes LLM wraps JSON in markdown code blocks
+        import re
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_text = json_match.group(1)
+        else:
+            # Try to find raw JSON
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(0)
+            else:
+                json_text = response_text
+        
+        result = json.loads(json_text)
+        
+        # Validate the response structure
+        if not isinstance(result, dict):
+            raise ValueError('LLM response is not a dictionary')
+        
+        # Ensure required fields exist with defaults
+        return {
+            'needs_action': bool(result.get('needs_action', False)),
+            'action_type': result.get('action_type'),
+            'task_description': result.get('task_description'),
+            'reason': result.get('reason', '理由が提供されていません'),
+        }
+        
+    except json.JSONDecodeError as exc:
+        logger.warning('Failed to parse LLM response as JSON: %s', exc)
+        return {
+            'needs_action': False,
+            'action_type': None,
+            'task_description': None,
+            'reason': f'LLMの応答をJSON形式で解析できませんでした: {exc}',
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Failed to analyze conversation history')
+        return {
+            'needs_action': False,
+            'action_type': None,
+            'task_description': None,
+            'reason': f'会話履歴の分析中にエラーが発生しました: {exc}',
+        }
+
+
+def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
+    """Synchronous wrapper for async conversation history analysis."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_analyze_conversation_history_async(conversation_history))
+    finally:
+        loop.close()
+
+
+@app.post('/api/check-conversation-history')
+def check_conversation_history() -> ResponseReturnValue:
+    """
+    Endpoint to receive and analyze conversation history from other agents.
+    
+    Expects JSON payload with:
+    - conversation_history: list of message objects with 'role' and 'content' fields
+    
+    Returns:
+    - analysis: the LLM analysis result
+    - action_taken: whether any browser action was initiated
+    - run_summary: summary of the action taken (if any)
+    """
+    payload = request.get_json(silent=True) or {}
+    conversation_history = payload.get('conversation_history', [])
+    
+    if not conversation_history:
+        return jsonify({'error': '会話履歴が提供されていません。'}), 400
+    
+    if not isinstance(conversation_history, list):
+        return jsonify({'error': '会話履歴はリスト形式である必要があります。'}), 400
+    
+    # Analyze the conversation history
+    analysis = _analyze_conversation_history(conversation_history)
+    
+    response_data = {
+        'analysis': analysis,
+        'action_taken': False,
+        'run_summary': None,
+    }
+    
+    # If action is needed, trigger the browser agent
+    if analysis.get('needs_action') and analysis.get('task_description'):
+        task_description = analysis['task_description']
+        
+        try:
+            controller = _get_agent_controller()
+        except AgentControllerError as exc:
+            logger.warning('Failed to initialize agent controller: %s', exc)
+            response_data['run_summary'] = f'エージェントの初期化に失敗しました: {exc}'
+            return jsonify(response_data), 200
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Unexpected error while initializing agent controller')
+            response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
+            return jsonify(response_data), 200
+        
+        # Check if agent is already running
+        if controller.is_running():
+            response_data['run_summary'] = 'エージェントは既に実行中です。後でもう一度お試しください。'
+            return jsonify(response_data), 409
+        
+        # Execute the task
+        try:
+            run_result = controller.run(task_description)
+            agent_history = run_result.filtered_history or run_result.history
+            
+            # Format the result
+            summary_message = _summarize_history(agent_history)
+            response_data['action_taken'] = True
+            response_data['run_summary'] = summary_message
+            response_data['agent_history'] = {
+                'steps': len(agent_history.history),
+                'success': agent_history.is_successful(),
+                'final_result': agent_history.final_result(),
+            }
+            
+        except AgentControllerError as exc:
+            logger.warning('Failed to execute browser agent task: %s', exc)
+            response_data['run_summary'] = f'エージェントの実行に失敗しました: {exc}'
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Unexpected error while executing browser agent task')
+            response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
+    
+    return jsonify(response_data), 200
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5005)
