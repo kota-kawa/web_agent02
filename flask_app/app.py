@@ -1794,6 +1794,8 @@ JSON形式で回答してください。その他の説明は不要です。"""
         
         # Try to parse JSON from the response
         # Sometimes LLM wraps JSON in markdown code blocks
+        # Note: These regex patterns work for simple JSON objects but may not handle
+        # deeply nested structures. The LLM is prompted to output simple JSON.
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
             json_text = json_match.group(1)
@@ -1846,12 +1848,18 @@ JSON形式で回答してください。その他の説明は不要です。"""
 
 
 def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
-    """Synchronous wrapper for async conversation history analysis."""
+    """
+    Synchronous wrapper for async conversation history analysis.
+    
+    Note: Uses asyncio.run() to create a new event loop since this is called
+    from Flask's synchronous request context. Falls back to manual loop creation
+    if an event loop is already running (e.g., in tests).
+    """
     try:
         return asyncio.run(_analyze_conversation_history_async(conversation_history))
     except RuntimeError as exc:
         # Handle case where event loop is already running
-        logger.warning('Event loop already running, creating new loop: %s', exc)
+        logger.debug('Event loop already running, creating new loop: %s', exc)
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(_analyze_conversation_history_async(conversation_history))

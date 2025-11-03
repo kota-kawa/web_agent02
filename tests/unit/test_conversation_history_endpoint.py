@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+# AgentHistoryList is used in StubController for mocking browser agent responses
 from browser_use.agent.views import AgentHistoryList
 from flask_app import app as app_module
 
