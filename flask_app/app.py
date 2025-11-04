@@ -38,6 +38,19 @@ except ModuleNotFoundError:
 
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
 
+# Import agent configuration for multi-agent communication
+try:
+    from agent_config import get_all_agents, get_agent_info, suggest_agent_for_task
+except ModuleNotFoundError:
+    # Add parent directory to path for agent_config
+    import sys
+    from pathlib import Path
+
+    ROOT_DIR = Path(__file__).resolve().parents[1]
+    if str(ROOT_DIR) not in sys.path:
+        sys.path.insert(0, str(ROOT_DIR))
+    from agent_config import get_all_agents, get_agent_info, suggest_agent_for_task
+
 try:
     from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 except ModuleNotFoundError:
@@ -2016,6 +2029,96 @@ def check_conversation_history() -> ResponseReturnValue:
             response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
     
     return jsonify(response_data), 200
+
+
+@app.get('/api/agents')
+def get_agents() -> ResponseReturnValue:
+    """
+    Get information about all available agents in the multi-agent system.
+    
+    Returns:
+        JSON response with agent information including:
+        - agent_id: unique identifier
+        - display_name: human-readable name
+        - description: capabilities and use cases
+        - api_endpoint: connection endpoint
+        - timeout: API timeout in seconds
+    """
+    agents = get_all_agents()
+    agent_list = []
+    
+    for agent_id, agent_info in agents.items():
+        agent_list.append({
+            'agent_id': agent_info.agent_id,
+            'display_name': agent_info.display_name,
+            'description': agent_info.description,
+            'api_endpoint': agent_info.api_endpoint,
+            'timeout': agent_info.timeout,
+        })
+    
+    return jsonify({'agents': agent_list}), 200
+
+
+@app.get('/api/agents/<agent_id>')
+def get_agent_by_id(agent_id: str) -> ResponseReturnValue:
+    """
+    Get detailed information about a specific agent.
+    
+    Args:
+        agent_id: The agent identifier (browser, faq, iot)
+    
+    Returns:
+        JSON response with agent information or error if not found
+    """
+    agent_info = get_agent_info(agent_id)  # type: ignore[arg-type]
+    
+    if not agent_info:
+        return jsonify({'error': f'エージェント {agent_id} が見つかりません。'}), 404
+    
+    return jsonify({
+        'agent_id': agent_info.agent_id,
+        'display_name': agent_info.display_name,
+        'description': agent_info.description,
+        'api_endpoint': agent_info.api_endpoint,
+        'timeout': agent_info.timeout,
+    }), 200
+
+
+@app.post('/api/agents/suggest')
+def suggest_agent() -> ResponseReturnValue:
+    """
+    Suggest the best agent(s) for a given task.
+    
+    Expects JSON payload with:
+        - task: description of the task to perform
+    
+    Returns:
+        JSON response with suggested agent IDs in priority order
+    """
+    payload = request.get_json(silent=True) or {}
+    task_description = payload.get('task', '').strip()
+    
+    if not task_description:
+        return jsonify({'error': 'タスクの説明を入力してください。'}), 400
+    
+    suggestions = suggest_agent_for_task(task_description)
+    
+    # Get detailed information for each suggested agent
+    suggested_agents = []
+    for agent_id in suggestions:
+        agent_info = get_agent_info(agent_id)
+        if agent_info:
+            suggested_agents.append({
+                'agent_id': agent_info.agent_id,
+                'display_name': agent_info.display_name,
+                'description': agent_info.description,
+                'api_endpoint': agent_info.api_endpoint,
+            })
+    
+    return jsonify({
+        'task': task_description,
+        'suggested_agents': suggested_agents,
+    }), 200
 
 
 if __name__ == '__main__':
