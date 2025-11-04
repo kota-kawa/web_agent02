@@ -857,7 +857,7 @@ class BrowserAgentController:
             self._session_recreated = False
         return recreated
 
-    async def _run_agent(self, task: str) -> AgentRunResult:
+    async def _run_agent(self, task: str, record_history: bool = True) -> AgentRunResult:
         session = await self._ensure_browser_session()
         session_recreated = self._consume_session_recreated()
 
@@ -870,6 +870,8 @@ class BrowserAgentController:
             model_output: AgentOutput,
             step_number: int,
         ) -> None:
+            if not record_history:
+                return
             try:
                 relative_step = step_number - starting_step_number + 1
                 if relative_step < 1:
@@ -882,12 +884,14 @@ class BrowserAgentController:
             except Exception:  # noqa: BLE001
                 self._logger.debug('Failed to broadcast step update', exc_info=True)
 
+        register_callback = handle_new_step if record_history else None
+
         def _create_new_agent(initial_task: str) -> Agent:
             fresh_agent = Agent(
                 task=initial_task,
                 browser_session=session,
                 llm=self._llm,
-                register_new_step_callback=handle_new_step,
+                register_new_step_callback=register_callback,
                 extend_system_message=_LANGUAGE_EXTENSION,
             )
             start_url = self._get_resume_url() or _DEFAULT_START_URL
@@ -919,7 +923,7 @@ class BrowserAgentController:
         else:
             agent = existing_agent
             agent.browser_session = session
-            agent.register_new_step_callback = handle_new_step
+            agent.register_new_step_callback = register_callback
             try:
                 agent.add_new_task(task)
                 self._prepare_agent_for_follow_up(agent, force_resume_navigation=session_recreated)
@@ -1407,12 +1411,15 @@ class BrowserAgentController:
             self._paused = False
         self._clear_step_message_ids()
 
-    def run(self, task: str) -> AgentRunResult:
+    def run(self, task: str, record_history: bool = True) -> AgentRunResult:
         if self._shutdown:
             raise AgentControllerError('エージェントコントローラーは停止済みです。')
 
         with self._lock:
-            future = asyncio.run_coroutine_threadsafe(self._run_agent(task), self._loop)
+            future = asyncio.run_coroutine_threadsafe(
+                self._run_agent(task, record_history=record_history),
+                self._loop,
+            )
             try:
                 return future.result()
             except AgentControllerError:
@@ -1685,6 +1692,67 @@ def chat() -> ResponseReturnValue:
     )
 
     return jsonify({'messages': _copy_history(), 'run_summary': summary_message}), 200
+
+
+@app.post('/api/agent-relay')
+def agent_relay() -> ResponseReturnValue:
+    """
+    Endpoint for receiving requests from external agents without updating the main chat history.
+    Expected JSON payload:
+    - prompt: instruction for the browser agent
+    """
+    payload = request.get_json(silent=True) or {}
+    prompt = (payload.get('prompt') or '').strip()
+
+    if not prompt:
+        return jsonify({'error': 'プロンプトを入力してください。'}), 400
+
+    try:
+        controller = _get_agent_controller()
+    except AgentControllerError as exc:
+        logger.warning('Failed to initialize agent controller for agent relay: %s', exc)
+        return jsonify({'error': f'エージェントの初期化に失敗しました: {exc}'}), 503
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Unexpected error while preparing agent controller for agent relay')
+        return jsonify({'error': f'エージェントの初期化中に予期しないエラーが発生しました: {exc}'}), 500
+
+    if controller.is_running():
+        return (
+            jsonify({'error': 'エージェントは既に実行中です。後でもう一度お試しください。'}),
+            409,
+        )
+
+    try:
+        run_result = controller.run(prompt, record_history=False)
+    except AgentControllerError as exc:
+        logger.warning('Failed to execute agent relay request: %s', exc)
+        return jsonify({'error': f'エージェントの実行に失敗しました: {exc}'}), 500
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Unexpected error while executing agent relay request')
+        return jsonify({'error': f'予期しないエラーが発生しました: {exc}'}), 500
+
+    agent_history = run_result.filtered_history or run_result.history
+    summary_message = _summarize_history(agent_history)
+    step_messages = [
+        {'step_number': number, 'content': content}
+        for number, content in _format_history_messages(agent_history)
+    ]
+
+    response_data: dict[str, Any] = {
+        'summary': summary_message,
+        'steps': step_messages,
+        'success': agent_history.is_successful(),
+        'final_result': agent_history.final_result(),
+    }
+
+    usage = getattr(agent_history, 'usage', None)
+    if usage is not None:
+        try:
+            response_data['usage'] = usage.model_dump()
+        except AttributeError:
+            response_data['usage'] = usage
+
+    return jsonify(response_data), 200
 
 
 @app.post('/api/reset')
