@@ -38,6 +38,13 @@ except ModuleNotFoundError:
 
 from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
 
+from .external_agents import (
+    ExternalAgentError,
+    call_external_agent,
+    describe_external_agents,
+    select_agent_for_prompt,
+)
+
 try:
     from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 except ModuleNotFoundError:
@@ -1516,6 +1523,13 @@ def history() -> ResponseReturnValue:
     return jsonify({'messages': _copy_history()}), 200
 
 
+@app.get('/api/external-agents')
+def list_external_agents() -> ResponseReturnValue:
+    """Return the available helper agents and their connection metadata."""
+
+    return jsonify({'agents': describe_external_agents()}), 200
+
+
 @app.get('/api/stream')
 def stream() -> ResponseReturnValue:
     listener = _broadcaster.subscribe()
@@ -1753,6 +1767,65 @@ def agent_relay() -> ResponseReturnValue:
             response_data['usage'] = usage
 
     return jsonify(response_data), 200
+
+
+@app.post('/api/external-agents/query')
+def query_external_agent() -> ResponseReturnValue:
+    """Forward a question to the most suitable helper agent."""
+
+    payload = request.get_json(silent=True) or {}
+    prompt = (payload.get('prompt') or '').strip()
+
+    if not prompt:
+        return jsonify({'error': '問い合わせ内容を入力してください。'}), 400
+
+    agent_hint = payload.get('agent')
+    metadata = payload.get('metadata')
+    if metadata is not None and not isinstance(metadata, dict):
+        return jsonify({'error': 'metadata はオブジェクト形式で指定してください。'}), 400
+
+    context_value = payload.get('context')
+    if context_value is not None and not isinstance(context_value, str):
+        return jsonify({'error': 'context は文字列で指定してください。'}), 400
+
+    include_snapshot = bool(payload.get('include_device_snapshot'))
+
+    agent_config = select_agent_for_prompt(prompt, agent_hint)
+
+    try:
+        agent_response = call_external_agent(
+            agent_config,
+            prompt,
+            metadata=metadata,
+            context=context_value,
+            include_snapshot=include_snapshot,
+        )
+    except ExternalAgentError as exc:
+        logger.warning('External agent %s query failed: %s', agent_config.key, exc)
+        return jsonify({'error': str(exc), 'agent': agent_config.key}), 502
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('Unexpected error while querying external agent')
+        return (
+            jsonify(
+                {
+                    'error': f'エージェントへの問い合わせで予期しないエラーが発生しました: {exc}',
+                    'agent': agent_config.key,
+                }
+            ),
+            500,
+        )
+
+    return (
+        jsonify(
+            {
+                'agent': agent_config.key,
+                'display_name': agent_config.display_name,
+                'description': agent_config.description,
+                'response': agent_response,
+            }
+        ),
+        200,
+    )
 
 
 @app.post('/api/reset')
