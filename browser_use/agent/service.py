@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 from uuid_extensions import uuid7str
 
 from browser_use import Browser, BrowserProfile, BrowserSession
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 
 # Lazy import for gif to avoid heavy agent.views import at startup
 # from browser_use.agent.gif import create_history_gif
@@ -329,11 +330,16 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		initial_url = None
 
 		# only load url if no initial actions are provided
-		if self.directly_open_url and not self.state.follow_up_task and not initial_actions:
-			initial_url = self._extract_url_from_task(self.task)
-			if initial_url:
-				self.logger.info(f'🔗 Found URL in task: {initial_url}, adding as initial action...')
-				initial_actions = [{'go_to_url': {'url': initial_url, 'new_tab': False}}]
+		if not self.state.follow_up_task and not initial_actions:
+			if self.directly_open_url:
+				initial_url = self._extract_url_from_task(self.task)
+				if initial_url:
+					self.logger.info(f'🔗 Found URL in task: {initial_url}, adding as initial action...')
+					initial_actions = [{'go_to_url': {'url': initial_url, 'new_tab': False}}]
+				else:
+					initial_url = DEFAULT_NEW_TAB_URL
+					self.logger.info('🌐 No URL found in task, starting from https://www.yahoo.co.jp by default...')
+					initial_actions = [{'go_to_url': {'url': initial_url, 'new_tab': False}}]
 
 		self.initial_url = initial_url
 

@@ -27,12 +27,16 @@ class SystemPrompt:
 		self.max_actions_per_step = max_actions_per_step
 		self.use_thinking = use_thinking
 		self.flash_mode = flash_mode
+		self.current_datetime_line = datetime.now().strftime('現在の日時ー%Y年%m月%d日%H時%M分')
 		prompt = ''
 		if override_system_message:
 			prompt = override_system_message
 		else:
 			self._load_prompt_template()
-			prompt = self.prompt_template.format(max_actions=self.max_actions_per_step)
+			prompt = self.prompt_template.format(
+				max_actions=self.max_actions_per_step,
+				current_datetime=self.current_datetime_line,
+			)
 
 		if extend_system_message:
 			prompt += f'\n{extend_system_message}'

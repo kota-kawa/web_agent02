@@ -4,8 +4,9 @@ import pytest
 
 from browser_use.agent.service import Agent
 from browser_use.agent.views import ActionResult, AgentHistory
-from browser_use.config import CONFIG
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.views import BrowserStateHistory
+from browser_use.config import CONFIG
 
 
 class DummyLLM:
@@ -258,5 +259,28 @@ def test_add_new_task_rotates_legacy_eventbus_while_running():
         agent.add_new_task('follow-up instructions')
 
         assert agent.eventbus.name != 'Agent_000-legacy'
+    finally:
+        CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync
+
+
+def test_agent_starts_with_yahoo_initial_action():
+    original_cloud_sync = CONFIG.BROWSER_USE_CLOUD_SYNC
+    CONFIG.BROWSER_USE_CLOUD_SYNC = False
+
+    try:
+        agent = Agent(
+            task='summarize the latest headlines',
+            llm=DummyLLM(),
+            browser_session=StubBrowserSession(),
+            calculate_cost=False,
+        )
+
+        assert agent.initial_url == DEFAULT_NEW_TAB_URL
+        assert agent.initial_actions is not None
+        assert len(agent.initial_actions) == 1
+        action = agent.initial_actions[0]
+        assert hasattr(action, 'go_to_url')
+        assert action.go_to_url.url == DEFAULT_NEW_TAB_URL
+        assert action.go_to_url.new_tab is False
     finally:
         CONFIG.BROWSER_USE_CLOUD_SYNC = original_cloud_sync

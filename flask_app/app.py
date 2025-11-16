@@ -14,6 +14,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from itertools import count
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -29,7 +30,6 @@ try:
     from browser_use import Agent, BrowserProfile, BrowserSession
 except ModuleNotFoundError:
     import sys
-    from pathlib import Path
 
     ROOT_DIR = Path(__file__).resolve().parents[1]
     if str(ROOT_DIR) not in sys.path:
@@ -50,6 +50,21 @@ load_dotenv()
 
 logging.basicConfig(level=os.environ.get('FLASK_LOG_LEVEL', 'INFO'))
 logger = logging.getLogger(__name__)
+
+_FINAL_RESPONSE_NOTICE = '※ ブラウザエージェントの応答はここで終了です。'
+_FINAL_RESPONSE_MARKER = '[browser-agent-final]'
+
+
+def _append_final_response_notice(message: str) -> str:
+    """Append a human/machine readable marker signalling that output is final."""
+
+    base = (message or '').strip()
+    if _FINAL_RESPONSE_MARKER in base:
+        return base
+    notice = f'{_FINAL_RESPONSE_NOTICE} {_FINAL_RESPONSE_MARKER}'.strip()
+    if base:
+        return f'{base}\n\n{notice}'
+    return notice
 
 
 def _env_int(name: str, default: int) -> int:
@@ -325,6 +340,61 @@ _LANGUAGE_EXTENSION = (
     '- GoogleやDuckDuckGoなどの検索エンジンは使用しないでください。\n'
 )
 
+_SYSTEM_PROMPT_FILENAME = 'system_prompt_browser_agent.md'
+_CUSTOM_SYSTEM_PROMPT_TEMPLATE: str | None = None
+_DEFAULT_MAX_ACTIONS_PER_STEP = 10
+
+
+def _system_prompt_candidate_paths() -> tuple[Path, ...]:
+    script_path = Path(__file__).resolve()
+    candidates: list[Path] = [script_path.parent / _SYSTEM_PROMPT_FILENAME]
+    try:
+        candidates.append(script_path.parents[1] / _SYSTEM_PROMPT_FILENAME)
+    except IndexError:
+        pass
+    # Preserve order but remove duplicates
+    unique_candidates: list[Path] = []
+    for candidate in candidates:
+        if candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+    return tuple(unique_candidates)
+
+
+def _load_custom_system_prompt_template() -> str | None:
+    global _CUSTOM_SYSTEM_PROMPT_TEMPLATE
+    if _CUSTOM_SYSTEM_PROMPT_TEMPLATE is not None:
+        return _CUSTOM_SYSTEM_PROMPT_TEMPLATE or None
+
+    for candidate in _system_prompt_candidate_paths():
+        if candidate.exists():
+            try:
+                _CUSTOM_SYSTEM_PROMPT_TEMPLATE = candidate.read_text(encoding='utf-8')
+                logger.info('Loaded system prompt template from %s', candidate)
+                return _CUSTOM_SYSTEM_PROMPT_TEMPLATE
+            except OSError:
+                logger.exception('Failed to read system prompt template at %s', candidate)
+                break
+
+    logger.warning(
+        'Custom system prompt file %s not found; falling back to the packaged prompt template.',
+        _SYSTEM_PROMPT_FILENAME,
+    )
+    _CUSTOM_SYSTEM_PROMPT_TEMPLATE = ''
+    return None
+
+
+def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS_PER_STEP) -> str | None:
+    template = _load_custom_system_prompt_template()
+    if not template:
+        return None
+
+    current_datetime_line = datetime.now().strftime('現在の日時ー%Y年%m月%d日%H時%M分')
+    try:
+        return template.format(max_actions=max_actions_per_step, current_datetime=current_datetime_line)
+    except Exception:  # noqa: BLE001
+        logger.exception('Failed to format custom system prompt template; using raw template contents.')
+        return template
+
 
 def _resolve_gemini_api_key() -> str:
     for key in ('GOOGLE_API_KEY', 'GEMINI_API_KEY'):
@@ -520,7 +590,7 @@ def _summarize_history(history: AgentHistoryList) -> str:
         if last_state and last_state.url:
             lines.append(f'最終URL: {last_state.url}')
 
-    return '\n'.join(lines)
+    return _append_final_response_notice('\n'.join(lines))
 
 
 def _probe_cdp_candidate(base_url: str) -> str | None:
@@ -887,12 +957,16 @@ class BrowserAgentController:
         register_callback = handle_new_step if record_history else None
 
         def _create_new_agent(initial_task: str) -> Agent:
+            custom_system_prompt = _build_custom_system_prompt()
+            extend_system_message = None if custom_system_prompt else _LANGUAGE_EXTENSION
             fresh_agent = Agent(
                 task=initial_task,
                 browser_session=session,
                 llm=self._llm,
                 register_new_step_callback=register_callback,
-                extend_system_message=_LANGUAGE_EXTENSION,
+                max_actions_per_step=_DEFAULT_MAX_ACTIONS_PER_STEP,
+                override_system_message=custom_system_prompt,
+                extend_system_message=extend_system_message,
             )
             start_url = self._get_resume_url() or _DEFAULT_START_URL
             if start_url and not fresh_agent.initial_actions:
@@ -1717,9 +1791,35 @@ def agent_relay() -> ResponseReturnValue:
         return jsonify({'error': f'エージェントの初期化中に予期しないエラーが発生しました: {exc}'}), 500
 
     if controller.is_running():
+        was_paused = controller.is_paused()
+        try:
+            controller.enqueue_follow_up(prompt)
+            if was_paused:
+                controller.resume()
+        except AgentControllerError as exc:
+            logger.warning('Failed to enqueue follow-up instruction via agent relay: %s', exc)
+            return (
+                jsonify({'error': f'フォローアップの指示の適用に失敗しました: {exc}'}),
+                400,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Unexpected error while enqueueing follow-up instruction via agent relay')
+            return (
+                jsonify({'error': f'フォローアップ指示の処理中に予期しないエラーが発生しました: {exc}'}),
+                500,
+            )
+
+        ack_message = 'フォローアップの指示を受け付けました。現在の実行に反映します。'
         return (
-            jsonify({'error': 'エージェントは既に実行中です。後でもう一度お試しください。'}),
-            409,
+            jsonify(
+                {
+                    'status': 'follow_up_enqueued',
+                    'message': ack_message,
+                    'agent_running': True,
+                    'queued': True,
+                }
+            ),
+            202,
         )
 
     try:

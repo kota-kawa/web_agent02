@@ -9,6 +9,7 @@ COPY flask_app/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY flask_app/ ./
+COPY system_prompt_browser_agent.md ./system_prompt_browser_agent.md
 
 ENV FLASK_APP=app.py \
     FLASK_RUN_HOST=0.0.0.0 \
