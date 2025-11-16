@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 from bubus import EventBus
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 from flask.typing import ResponseReturnValue
 
 try:
@@ -87,8 +87,28 @@ _CDP_DETECTION_RETRY_DELAY = float(os.environ.get('BROWSER_USE_CDP_RETRY_DELAY',
 
 _CDP_SESSION_CLEANUP: Callable[[], None] | None = None
 
+APP_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 app = Flask(__name__)
 app.json.ensure_ascii = False
+
+
+@app.route("/favicon.ico")
+def favicon() -> ResponseReturnValue:
+    """Serve the browser agent favicon for root requests."""
+
+    return send_from_directory(
+        APP_STATIC_DIR / "icons",
+        "browser-agent-favicon.ico",
+        mimetype="image/x-icon",
+    )
+
+
+@app.route("/favicon.png")
+def favicon_png() -> ResponseReturnValue:
+    """Serve the png favicon variant for clients that request it."""
+
+    return send_from_directory(APP_STATIC_DIR / "icons", "browser-agent-favicon.png")
 
 
 @app.before_request
