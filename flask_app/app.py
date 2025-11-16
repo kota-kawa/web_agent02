@@ -99,7 +99,7 @@ def favicon() -> ResponseReturnValue:
 
     return send_from_directory(
         APP_STATIC_DIR / "icons",
-        "browser-agent-favicon.ico",
+        "browser-agent.ico",
         mimetype="image/x-icon",
     )
 
@@ -108,7 +108,7 @@ def favicon() -> ResponseReturnValue:
 def favicon_png() -> ResponseReturnValue:
     """Serve the png favicon variant for clients that request it."""
 
-    return send_from_directory(APP_STATIC_DIR / "icons", "browser-agent-favicon.png")
+    return send_from_directory(APP_STATIC_DIR / "icons", "browser-agent.png")
 
 
 @app.before_request
