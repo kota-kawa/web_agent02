@@ -2,7 +2,7 @@
 
 ## 目的と全体像
 - このリポジトリは `browser_use` のフルソースと、Flask ベースのブラウザ操作エージェント UI/API (`flask_app/`) を同梱し、他エージェントからの会話ログを解析してブラウザタスクを自動実行できるようにしています。
-- 主要な変更点は `flask_app/app.py` にある `BrowserAgentController` と HTTP エンドポイント群です。Gemini ベースの LLM、Chrome DevTools (CDP) セッション、EventBus を常駐させ、SSE で UI に進捗を配信します。
+- 主要な変更点は `flask_app/controller.py` の `BrowserAgentController` と `flask_app/app.py` の HTTP エンドポイント群です。Gemini ベースの LLM、Chrome DevTools (CDP) セッション、EventBus を常駐させ、SSE で UI に進捗を配信します。
 - `IMPLEMENTATION_SUMMARY.md` と `docs/conversation_history_endpoint.md` に最新仕様を残してあるので、フローを変える場合は必ず両方を更新してください。
 
 ## ディレクトリ構成の要点
@@ -12,9 +12,9 @@
 - `examples/` : `examples/api/conversation_history_check_example.py` などサンプル集。再利用が基本方針。
 - `docker/` とトップレベル `Dockerfile*` : Chrome/VNC コンテナと Flask コンテナのビルド設定。`docker-compose.yml` は `browser-agent` + `browser` + 共有ネットワーク (`MULTI_AGENT_NETWORK`) を前提にしています。
 - `bin/` : `setup.sh`, `test.sh`, `lint.sh`。`uv` ベースの開発環境を前提にしており、プロジェクトルートでの実行を想定。
-- `system_prompt_browser_agent.md` : Flask アプリが読み込むカスタム system prompt。`flask_app/app.py` の `_build_custom_system_prompt()` から `max_actions`/`current_datetime` を埋め込みます。
+- `system_prompt_browser_agent.md` : Flask アプリが読み込むカスタム system prompt。`flask_app/system_prompt.py` の `_build_custom_system_prompt()` から `max_actions`/`current_datetime` を埋め込みます。
 
-## Runtime/Controller の仕組み (`flask_app/app.py`)
+## Runtime/Controller の仕組み (`flask_app/controller.py` + `flask_app/app.py`)
 - `BrowserAgentController`
   - CDP URL を検出 (`_resolve_cdp_url`) し、`BrowserSession` を常駐させるスレッド＋イベントループを持ちます。
   - `GOOGLE_API_KEY` or `GEMINI_API_KEY`、`GOOGLE_GEMINI_MODEL`/`GEMINI_MODEL` に基づき `ChatGoogle` を生成し、`Agent` を初期化。日本語出力を強制する `_LANGUAGE_EXTENSION` と system prompt 差し替えをサポート。
@@ -35,13 +35,13 @@
 - `POST /api/chat` : UI からの通常実行。`new_task` 指定で履歴を切り替え、完了後 `_summarize_history()` を返却。失敗時も履歴にメッセージを積み、SSE ステータスを更新。
 - `POST /api/agent-relay` : 他エージェント用。エージェント稼働中なら `enqueue_follow_up()`、アイドル時は履歴非記録モードで即時実行。返り値に `steps`, `usage` などを含めます。
 - `POST /api/reset|pause|resume` : コントローラ状態操作。
-- `POST /api/check-conversation-history` : **新規追加**。会話履歴を受信 → `_analyze_conversation_history()` → 必要なら `controller.run()` を発火。`analysis`, `action_taken`, `run_summary`, `agent_history` を返す。409 で「実行中」通知。
+- `POST /api/conversations/review` (alias `/api/check-conversation-history`) : 会話履歴 `{"history":[{"role","content"}]}` を受信 → `_analyze_conversation_history()` → 「一言あった方が良い」場合は `should_reply`/`reply`/`addressed_agents` を返し、必要なら `controller.run()` を発火。`analysis`, `action_taken`, `run_summary`, `agent_history` を返す。409 で「実行中」通知。
 - すべてのレスポンスに緩い CORS を付与 (`_handle_cors_preflight`, `_set_cors_headers`)。
 - `templates/index.html` は日本語 UI、`static/css/style.css`/JS で SSE 接続、思考中インジケータ、Pause/Reset ボタン等を制御。
 
 ## LLM・プロンプト関連
 - `system_prompt_browser_agent.md` の `{max_actions}` `{current_datetime}` プレースホルダは自動置換されます。編集時は日本語応答ルールや検索ポリシー（Yahoo 強制など）を壊さないこと。
-- `flask_app/app.py` の `_LANGUAGE_EXTENSION` で追加指示を付与。`GOOGLE_GEMINI_TEMPERATURE` が設定されていれば float で渡されます。
+- `flask_app/system_prompt.py` の `_LANGUAGE_EXTENSION` で追加指示を付与。`GOOGLE_GEMINI_TEMPERATURE` が設定されていれば float で渡されます。
 - `browser_use/llm` には Anthropic/OpenAI/Groq/Ollama などのクライアントとテストがあります。Gemini 以外を使いたい場合はまずこの層を拡張し、Flask 側で差し替えられるようにする。
 
 ## ビルド・実行・検証
