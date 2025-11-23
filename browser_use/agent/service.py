@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any, ClassVar, Generic, Literal, TypeVar
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
 from browser_use.agent.cloud_events import (
 	CreateAgentOutputFileEvent,
 	CreateAgentSessionEvent,
@@ -26,10 +24,11 @@ from browser_use.agent.message_manager.utils import save_conversation
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
 from browser_use.llm.google.chat import ChatGoogle
+from browser_use.env_loader import load_secrets_env
 from browser_use.tokens.service import TokenCost
 from bubus import EventBus
 
-load_dotenv()
+load_secrets_env()
 
 from pydantic import BaseModel, ValidationError
 from uuid_extensions import uuid7str

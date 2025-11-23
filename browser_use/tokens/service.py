@@ -14,8 +14,8 @@ from typing import Any
 
 import aiofiles
 import httpx
-from dotenv import load_dotenv
 
+from browser_use.env_loader import load_secrets_env
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.views import ChatInvokeUsage
 from browser_use.tokens.views import (
@@ -28,7 +28,7 @@ from browser_use.tokens.views import (
 	UsageSummary,
 )
 
-load_dotenv()
+load_secrets_env()
 
 from browser_use.config import CONFIG
 

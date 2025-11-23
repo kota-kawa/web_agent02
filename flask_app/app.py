@@ -14,6 +14,7 @@ from .controller import BrowserAgentController
 from .env_utils import _AGENT_MAX_STEPS, _BROWSER_URL
 from .exceptions import AgentControllerError
 from .formatting import _format_history_messages, _summarize_history
+from browser_use.model_selection import update_override
 from .history import (
     _append_history_message,
     _broadcaster,
@@ -107,6 +108,18 @@ def _get_agent_controller() -> BrowserAgentController:
     return _AGENT_CONTROLLER
 
 
+def _reset_agent_controller() -> None:
+    """Shutdown existing controller so the next request uses refreshed LLM settings."""
+
+    global _AGENT_CONTROLLER
+    if _AGENT_CONTROLLER is not None:
+        try:
+            _AGENT_CONTROLLER.shutdown()
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to shutdown controller during model refresh", exc_info=True)
+    _AGENT_CONTROLLER = None
+
+
 def _get_existing_controller() -> BrowserAgentController:
     if _AGENT_CONTROLLER is None:
         raise AgentControllerError('エージェントはまだ初期化されていません。')
@@ -153,6 +166,21 @@ def stream() -> ResponseReturnValue:
 
     headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
     return Response(stream_with_context(event_stream()), mimetype='text/event-stream', headers=headers)
+
+
+@app.post('/model_settings')
+def update_model_settings() -> ResponseReturnValue:
+    """Update LLM selection and recycle controller without restart."""
+
+    payload = request.get_json(silent=True) or {}
+    selection = payload if isinstance(payload, dict) else {}
+    try:
+        update_override(selection if selection else None)
+        _reset_agent_controller()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to apply model settings: %s", exc)
+        return jsonify({"error": "モデル設定の更新に失敗しました。"}), 500
+    return jsonify({"status": "ok", "applied": selection or "from_file"})
 
 
 @app.post('/api/chat')
@@ -221,6 +249,24 @@ def chat() -> ResponseReturnValue:
             return jsonify({'messages': _copy_history(), 'run_summary': message}), 400
 
     _append_history_message('user', prompt)
+
+    # First prompt of a task: decide if browser actions are needed
+    if not controller.is_running() and not controller.has_handled_initial_prompt():
+        analysis = _analyze_conversation_history(_copy_history())
+        if not analysis.get('needs_action'):
+            reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
+            _append_history_message('assistant', reply)
+            controller.mark_initial_prompt_handled()
+            _broadcaster.publish(
+                {
+                    'type': 'status',
+                    'payload': {
+                        'agent_running': False,
+                        'run_summary': reply,
+                    },
+                }
+            )
+            return jsonify({'messages': _copy_history(), 'run_summary': reply}), 200
 
     if controller.is_running():
         was_paused = controller.is_paused()
@@ -336,6 +382,26 @@ def agent_relay() -> ResponseReturnValue:
     except Exception as exc:  # noqa: BLE001
         logger.exception('Unexpected error while preparing agent controller for agent relay')
         return jsonify({'error': f'エージェントの初期化中に予期しないエラーが発生しました: {exc}'}), 500
+
+    # First prompt of a task: decide if browser actions are needed
+    if not controller.is_running() and not controller.has_handled_initial_prompt():
+        analysis = _analyze_conversation_history([{'role': 'user', 'content': prompt}])
+        if not analysis.get('needs_action'):
+            reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
+            controller.mark_initial_prompt_handled()
+            return (
+                jsonify(
+                    {
+                        'summary': reply,
+                        'steps': [],
+                        'success': True,
+                        'final_result': reply,
+                        'analysis': analysis,
+                        'action_taken': False,
+                    }
+                ),
+                200,
+            )
 
     if controller.is_running():
         was_paused = controller.is_paused()

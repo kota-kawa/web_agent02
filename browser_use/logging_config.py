@@ -3,9 +3,9 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+from browser_use.env_loader import load_secrets_env
 
-load_dotenv()
+load_secrets_env()
 
 from browser_use.config import CONFIG
 

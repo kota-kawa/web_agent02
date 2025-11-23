@@ -1,7 +1,7 @@
 # Implementation Summary: Conversation History Check Endpoint
 
 ## Overview
-This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed.
+This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary.
 
 ## Problem Statement (Japanese)
 他のエージェントから、会話履歴が送信されてくる時がある。そのために、受け入れるためのエンドポイントを新規で作成してほしい。そして、その会話履歴を確認して、何か問題が発生していて、ブラウザ操作をして解決できそうな場合には、既存のロジックを使って、解決のために操作を実行してほしい。特に何もしなくてよさそうならば、何もしないようにしてほしい。つまり、会話履歴のチェック用のエンドポイントと、それに対するLLMがjsonを出力して、その出力をチェックして処理をするコードを書いてほしい。
@@ -16,6 +16,7 @@ Translation: Sometimes conversation history is sent from other agents. Create a 
    - Added `_analyze_conversation_history_async()` function (lines 1735-1837)
    - Added `_analyze_conversation_history()` synchronous wrapper (lines 1840-1846)
    - Added `/api/check-conversation-history` endpoint (lines 1849-1922)
+   - Added first-prompt text-only handling for `/api/chat` and `/api/agent-relay` when `needs_action=false`
 
 ### Files Created
 
@@ -59,7 +60,12 @@ When action is needed:
 - Uses existing `_summarize_history()` to format results
 - Maintains compatibility with the existing codebase
 
-### 4. Error Handling
+### 4. Text-only handling for the first prompt of a task
+- `/api/chat` and `/api/agent-relay` run a one-time LLM check on the first prompt of a task.
+- If `needs_action=false`, they return only a short text reply (from `analysis.reply` or `reason`) without invoking the browser agent.
+- Subsequent prompts follow the existing browser-agent execution flow.
+
+### 5. Error Handling
 Comprehensive error handling for:
 - Missing or invalid conversation history
 - LLM initialization failures

@@ -18,10 +18,10 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, Literal, TypeVar, cast
 
-logger = logging.getLogger(__name__)
-from dotenv import load_dotenv
+from browser_use.env_loader import load_secrets_env
 
-load_dotenv()
+logger = logging.getLogger(__name__)
+load_secrets_env()
 
 # Type definitions
 F = TypeVar('F', bound=Callable[..., Any])

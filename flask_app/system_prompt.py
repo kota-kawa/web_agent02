@@ -10,7 +10,7 @@ _LANGUAGE_EXTENSION = (
     '- すべての思考過程、行動の評価、メモリ、次の目標、最終報告などの文章は必ず自然な日本語で記述してください。\n'
     '- 成功や失敗などのステータスも日本語（例: 成功、失敗、未確定）で明示してください。\n'
     '- Webページ上の固有名詞や引用、ユーザーに提示する必要がある原文テキストは、そのままの言語で保持しても問題ありません。\n'
-    '- GoogleやDuckDuckGoなどの検索エンジンは使用しないでください。\n'
+    '- GoogleやDuckDuckGoなどの検索エンジンは使用しないでください。yahoo.co.jpを基本的には使用してください。\n'
 )
 
 _SYSTEM_PROMPT_FILENAME = 'system_prompt_browser_agent.md'
@@ -20,17 +20,8 @@ _DEFAULT_MAX_ACTIONS_PER_STEP = 10
 
 def _system_prompt_candidate_paths() -> tuple[Path, ...]:
     script_path = Path(__file__).resolve()
-    candidates: list[Path] = [script_path.parent / _SYSTEM_PROMPT_FILENAME]
-    try:
-        candidates.append(script_path.parents[1] / _SYSTEM_PROMPT_FILENAME)
-    except IndexError:
-        pass
-    # Preserve order but remove duplicates
-    unique_candidates: list[Path] = []
-    for candidate in candidates:
-        if candidate not in unique_candidates:
-            unique_candidates.append(candidate)
-    return tuple(unique_candidates)
+    # Only allow the prompt that lives alongside this module
+    return (script_path.parent / _SYSTEM_PROMPT_FILENAME,)
 
 
 def _load_custom_system_prompt_template() -> str | None:
@@ -49,8 +40,8 @@ def _load_custom_system_prompt_template() -> str | None:
                 break
 
     logger.warning(
-        'Custom system prompt file %s not found; falling back to the packaged prompt template.',
-        _SYSTEM_PROMPT_FILENAME,
+        'Custom system prompt file %s not found next to flask_app; no other prompt sources will be used.',
+        _system_prompt_candidate_paths()[0],
     )
     _CUSTOM_SYSTEM_PROMPT_TEMPLATE = ''
     return None

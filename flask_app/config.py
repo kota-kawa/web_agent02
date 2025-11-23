@@ -4,9 +4,9 @@ import logging
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from browser_use.env_loader import load_secrets_env
 
-load_dotenv()
+load_secrets_env()
 
 logging.basicConfig(level=os.environ.get('FLASK_LOG_LEVEL', 'INFO'))
 logger = logging.getLogger('flask_app.app')

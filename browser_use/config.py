@@ -180,7 +180,12 @@ class OldConfig:
 class FlatEnvConfig(BaseSettings):
 	"""All environment variables in a flat namespace."""
 
-	model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', case_sensitive=True, extra='allow')
+	model_config = SettingsConfigDict(
+		env_file=('secrets.env', '.env'),
+		env_file_encoding='utf-8',
+		case_sensitive=True,
+		extra='allow',
+	)
 
 	# Logging and telemetry
 	BROWSER_USE_LOGGING_LEVEL: str = Field(default='info')

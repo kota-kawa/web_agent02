@@ -19,13 +19,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from browser_use.env_loader import load_secrets_env
 
 from browser_use.llm.anthropic.chat import ChatAnthropic
 from browser_use.llm.google.chat import ChatGoogle
 from browser_use.llm.openai.chat import ChatOpenAI
 
-load_dotenv()
+load_secrets_env()
 
 from browser_use import Agent, Controller
 from browser_use.agent.views import AgentSettings
@@ -1938,8 +1938,8 @@ def run_main_interface(ctx: click.Context, debug: bool = False, **kwargs):
 	if debug:
 		logger.debug(f'System info: Python {sys.version.split()[0]}, Platform: {sys.platform}')
 
-	logger.debug('Loading environment variables from .env file...')
-	load_dotenv()
+	logger.debug('Loading environment variables from secrets.env...')
+	load_secrets_env()
 	logger.debug('Environment variables loaded')
 
 	# Load user configuration

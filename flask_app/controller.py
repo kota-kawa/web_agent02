@@ -18,7 +18,7 @@ from .env_utils import _DEFAULT_START_URL, _env_int
 from .exceptions import AgentControllerError
 from .formatting import _format_step_plan
 from .history import _append_history_message
-from .llm_setup import _create_gemini_llm
+from .llm_setup import _create_selected_llm
 from .system_prompt import _DEFAULT_MAX_ACTIONS_PER_STEP, _LANGUAGE_EXTENSION, _build_custom_system_prompt
 
 try:
@@ -67,7 +67,7 @@ class BrowserAgentController:
         self._shutdown = False
         self._logger = logging.getLogger('browser_use.flask.agent')
         self._cdp_cleanup = cdp_cleanup
-        self._llm = _create_gemini_llm()
+        self._llm = _create_selected_llm()
         self._agent: Agent | None = None
         self._current_agent: Agent | None = None
         self._is_running = False
@@ -77,6 +77,7 @@ class BrowserAgentController:
         self._resume_url: str | None = None
         self._session_recreated = False
         self._start_page_ready = False
+        self._initial_prompt_handled = False
         atexit.register(self.shutdown)
 
     def _run_loop(self) -> None:
@@ -693,6 +694,7 @@ class BrowserAgentController:
             self._agent = None
             self._current_agent = None
             self._paused = False
+            self._initial_prompt_handled = False
         self._set_resume_url(None)
         self._clear_step_message_ids()
 
@@ -703,6 +705,7 @@ class BrowserAgentController:
             self._agent = None
             self._current_agent = None
             self._paused = False
+            self._initial_prompt_handled = False
         self._clear_step_message_ids()
 
     def run(self, task: str, record_history: bool = True) -> AgentRunResult:
@@ -714,12 +717,22 @@ class BrowserAgentController:
                 self._run_agent(task, record_history=record_history),
                 self._loop,
             )
+            with self._state_lock:
+                self._initial_prompt_handled = True
             try:
                 return future.result()
             except AgentControllerError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 raise AgentControllerError(str(exc)) from exc
+
+    def has_handled_initial_prompt(self) -> bool:
+        with self._state_lock:
+            return self._initial_prompt_handled
+
+    def mark_initial_prompt_handled(self) -> None:
+        with self._state_lock:
+            self._initial_prompt_handled = True
 
     def shutdown(self) -> None:
         if self._shutdown:

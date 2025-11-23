@@ -7,50 +7,34 @@ from typing import Any
 from .config import logger
 from .env_utils import _get_env_trimmed
 from .exceptions import AgentControllerError
+from browser_use.model_selection import apply_model_selection, update_override
 
 try:
-    from browser_use.llm.google.chat import ChatGoogle
+    from browser_use.llm.openai.chat import ChatOpenAI
 except ModuleNotFoundError:
     import sys
 
     ROOT_DIR = Path(__file__).resolve().parents[1]
     if str(ROOT_DIR) not in sys.path:
         sys.path.insert(0, str(ROOT_DIR))
-    from browser_use.llm.google.chat import ChatGoogle
-
-_DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
+    from browser_use.llm.openai.chat import ChatOpenAI
 
 
-def _resolve_gemini_api_key() -> str:
-    for key in ('GOOGLE_API_KEY', 'GEMINI_API_KEY'):
-        value = _get_env_trimmed(key)
-        if value:
-            return value
-    return ''
+def _create_selected_llm(selection_override: dict | None = None) -> ChatOpenAI:
+    """Create an OpenAI-compatible LLM using the selected provider/model."""
 
-
-def _create_gemini_llm() -> ChatGoogle:
-    api_key = _resolve_gemini_api_key()
+    applied = update_override(selection_override) if selection_override else apply_model_selection("browser")
+    api_key = _get_env_trimmed('OPENAI_API_KEY')
     if not api_key:
-        raise AgentControllerError(
-            'GeminiのAPIキーが設定されていません。環境変数 GOOGLE_API_KEY または GEMINI_API_KEY にキーを設定してください。',
-        )
+        raise AgentControllerError('OPENAI_API_KEY が設定されていません。ブラウザエージェントの secrets.env を確認してください。')
 
-    model = (
-        _get_env_trimmed('GOOGLE_GEMINI_MODEL')
-        or _get_env_trimmed('GEMINI_MODEL')
-        or _DEFAULT_GEMINI_MODEL
-    )
+    model = applied.get('model') or _get_env_trimmed('DEFAULT_LLM') or ''
+    base_url = applied.get('base_url') or _get_env_trimmed('OPENAI_BASE_URL') or None
+    if not model:
+        raise AgentControllerError('モデル名が設定されていません。設定モーダルから再保存してください。')
 
-    temperature_value = os.environ.get('GOOGLE_GEMINI_TEMPERATURE')
     llm_kwargs: dict[str, Any] = {'model': model, 'api_key': api_key}
-    if temperature_value is not None:
-        try:
-            llm_kwargs['temperature'] = float(temperature_value)
-        except ValueError:
-            logger.warning(
-                '環境変数GOOGLE_GEMINI_TEMPERATUREの値が無効のため既定値を使用します: %s',
-                temperature_value,
-            )
+    if base_url:
+        llm_kwargs['base_url'] = base_url
 
-    return ChatGoogle(**llm_kwargs)
+    return ChatOpenAI(**llm_kwargs)

@@ -105,11 +105,35 @@ def get_llm_by_name(model_name: str):
 
 	# Google Models
 	elif provider == 'google':
-		api_key = os.getenv('GOOGLE_API_KEY')
+		api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('OPENAI_API_KEY')
+		base_url = os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE')
+		if base_url:
+			return ChatOpenAI(model=model, api_key=api_key, base_url=base_url)
 		return ChatGoogle(model=model, api_key=api_key)
 
+	elif provider in {'groq', 'claude', 'gemini'}:
+		api_key_env = {
+			'groq': 'GROQ_API_KEY',
+			'claude': 'CLAUDE_API_KEY',
+			'gemini': 'GEMINI_API_KEY',
+		}.get(provider, 'OPENAI_API_KEY')
+		api_key = os.getenv(api_key_env) or os.getenv('OPENAI_API_KEY')
+		base_url_env = {
+			'groq': 'GROQ_API_BASE',
+			'claude': 'CLAUDE_API_BASE',
+			'gemini': 'GEMINI_API_BASE',
+		}.get(provider, 'OPENAI_BASE_URL')
+		base_url = os.getenv(base_url_env) or os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE')
+		if provider == 'gemini' and not base_url:
+			base_url = 'https://generativelanguage.googleapis.com/openai/v1'
+		if provider == 'groq' and not base_url:
+			base_url = 'https://api.groq.com/openai/v1'
+		if provider == 'claude' and not base_url:
+			base_url = 'https://openrouter.ai/api/v1'
+		return ChatOpenAI(model=model, api_key=api_key, base_url=base_url)
+
 	else:
-		available_providers = ['openai', 'azure', 'google']
+		available_providers = ['openai', 'azure', 'google', 'groq', 'claude', 'gemini']
 		raise ValueError(f"Unknown provider: '{provider}'. Available providers: {', '.join(available_providers)}")
 
 
