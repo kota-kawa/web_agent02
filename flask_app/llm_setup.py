@@ -54,13 +54,11 @@ def _create_selected_llm(selection_override: dict | None = None) -> BaseChatMode
 		llm_kwargs['base_url'] = base_url
 
 	# Instantiate the correct client based on the provider
-	if provider == 'google':
+	if provider == 'gemini':
 		logger.info(f'Using Google (Gemini) model: {model}')
 		return ChatGoogle(**llm_kwargs)
-	if provider == 'anthropic':
+	if provider == 'claude':
 		logger.info(f'Using Anthropic (Claude) model: {model}')
-		# Ensure 'base_url' is not passed if the client does not support it
-		llm_kwargs.pop('base_url', None)
 		return ChatAnthropic(**llm_kwargs)
 	if provider == 'groq':
 		logger.info(f'Using Groq model: {model}')

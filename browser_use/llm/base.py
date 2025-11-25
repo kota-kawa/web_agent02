@@ -41,6 +41,10 @@ class BaseChatModel(Protocol):
 		self, messages: list[BaseMessage], output_format: type[T] | None = None
 	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]: ...
 
+	async def aclose(self) -> None:
+		"""Close the underlying HTTP client."""
+		...
+
 	@classmethod
 	def __get_pydantic_core_schema__(
 		cls,

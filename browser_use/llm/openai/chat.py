@@ -69,6 +69,12 @@ class ChatOpenAI(BaseChatModel):
 		]
 	)
 
+	_async_client: AsyncOpenAI = field(init=False, repr=False)
+
+	def __post_init__(self) -> None:
+		client_params = self._get_client_params()
+		self._async_client = AsyncOpenAI(**client_params)
+
 	# Static
 	@property
 	def provider(self) -> str:
@@ -106,8 +112,7 @@ class ChatOpenAI(BaseChatModel):
 		Returns:
 			AsyncOpenAI: An instance of the AsyncOpenAI client.
 		"""
-		client_params = self._get_client_params()
-		return AsyncOpenAI(**client_params)
+		return self._async_client
 
 	@property
 	def name(self) -> str:
@@ -271,3 +276,8 @@ class ChatOpenAI(BaseChatModel):
 
 		except Exception as e:
 			raise ModelProviderError(message=str(e), model=self.name) from e
+
+	async def aclose(self) -> None:
+		"""Close the underlying HTTP client."""
+		if hasattr(self, '_async_client') and not self._async_client.is_closed:
+			await self._async_client.aclose()

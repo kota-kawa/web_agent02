@@ -1,6 +1,6 @@
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar, overload
 
 import httpx
@@ -50,6 +50,12 @@ class ChatAnthropic(BaseChatModel):
 	max_retries: int = 10
 	default_headers: Mapping[str, str] | None = None
 	default_query: Mapping[str, object] | None = None
+
+	_async_client: AsyncAnthropic = field(init=False, repr=False)
+
+	def __post_init__(self) -> None:
+		client_params = self._get_client_params()
+		self._async_client = AsyncAnthropic(**client_params)
 
 	# Static
 	@property
@@ -103,8 +109,7 @@ class ChatAnthropic(BaseChatModel):
 		Returns:
 			AsyncAnthropic: An instance of the AsyncAnthropic client.
 		"""
-		client_params = self._get_client_params()
-		return AsyncAnthropic(**client_params)
+		return self._async_client
 
 	@property
 	def name(self) -> str:
@@ -234,3 +239,8 @@ class ChatAnthropic(BaseChatModel):
 			raise ModelProviderError(message=e.message, status_code=e.status_code, model=self.name) from e
 		except Exception as e:
 			raise ModelProviderError(message=str(e), model=self.name) from e
+
+	async def aclose(self) -> None:
+		"""Close the underlying HTTP client."""
+		if hasattr(self, '_async_client') and not self._async_client.is_closed:
+			await self._async_client.aclose()

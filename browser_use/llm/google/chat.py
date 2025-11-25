@@ -4,126 +4,187 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar, overload
-
 import httpx
-from openai import AsyncOpenAI
-from openai.types.shared.chat_model import ChatModel
-from openai.types.shared_params.reasoning_effort import ReasoningEffort
 from pydantic import BaseModel
-
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.exceptions import ModelProviderError
-from browser_use.llm.messages import BaseMessage
-from browser_use.llm.openai.chat import ChatOpenAI
+from browser_use.llm.messages import BaseMessage, SystemMessage, UserMessage, AssistantMessage
 from browser_use.llm.views import ChatInvokeCompletion
+import json
 
 T = TypeVar('T', bound=BaseModel)
 
-
 VerifiedGeminiModels = Literal[
-	'gemini-2.0-flash',
-	'gemini-2.0-flash-exp',
-	'gemini-2.0-flash-lite-preview-02-05',
-	'Gemini-2.0-exp',
-	'gemma-3-27b-it',
-	'gemma-3-4b',
-	'gemma-3-12b',
-	'gemma-3n-e2b',
-	'gemma-3n-e4b',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3-pro-preview',
 ]
-
 
 @dataclass
 class ChatGoogle(BaseChatModel):
-	"""Google Gemini chat wrapper built on the OpenAI Python SDK."""
+    """Google Gemini chat wrapper."""
 
-	model: VerifiedGeminiModels | ChatModel | str
-	temperature: float | None = 0.2
-	frequency_penalty: float | None = 0.3
-	reasoning_effort: ReasoningEffort = 'low'
-	seed: int | None = None
-	service_tier: Literal['auto', 'default', 'flex', 'priority', 'scale'] | None = None
-	top_p: float | None = None
-	add_schema_to_system_prompt: bool = False
-	max_output_tokens: int | None = 4096
+    model: VerifiedGeminiModels | str
+    temperature: float | None = 0.2
+    top_p: float | None = None
+    max_output_tokens: int | None = 4096
+    api_key: str | None = None
+    base_url: str = 'https://generativelanguage.googleapis.com/v1beta'
+    timeout: float | httpx.Timeout | None = None
+    max_retries: int = 5
+    http_client: httpx.AsyncClient | None = None
 
-	# Compatibility fields retained for API parity with the legacy client
-	config: Mapping[str, Any] | None = None
-	include_system_in_user: bool = False
-	supports_structured_output: bool = True
-	thinking_budget: int | None = None
-	vertexai: bool | None = None
-	credentials: Any | None = None
-	project: str | None = None
-	location: str | None = None
-	http_options: Mapping[str, Any] | None = None
+    _async_client: httpx.AsyncClient = field(init=False, repr=False)
 
-	# Client configuration
-	api_key: str | None = None
-	base_url: str | httpx.URL | None = 'https://generativelanguage.googleapis.com/v1beta/openai'
-	default_headers: Mapping[str, str] | None = None
-	default_query: Mapping[str, object] | None = None
-	timeout: float | httpx.Timeout | None = None
-	max_retries: int = 5
-	http_client: httpx.AsyncClient | None = None
+    def __post_init__(self) -> None:
+        google_api_key = self.api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+        if not google_api_key:
+            raise ModelProviderError(
+                message='Google API key not provided',
+                status_code=401,
+                model=str(self.model),
+            )
+        self.api_key = google_api_key
+        self._async_client = self.http_client or httpx.AsyncClient(timeout=self.timeout)
 
-	_delegate: ChatOpenAI = field(init=False, repr=False)
+    @property
+    def provider(self) -> str:
+        return 'google'
 
-	def __post_init__(self) -> None:
-		google_api_key = self.api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
-		if not google_api_key:
-			raise ModelProviderError(
-				message='Google API key not provided',
-				status_code=401,
-				model=str(self.model),
-			)
+    @property
+    def name(self) -> str:
+        return str(self.model)
 
-		headers = dict(self.default_headers or {})
-		headers.setdefault('x-goog-api-key', google_api_key)
+    def _prepare_messages(self, messages: list[BaseMessage]) -> list[dict[str, Any]]:
+        gemini_messages = []
+        system_instruction = None
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                # Gemini API handles system instructions separately
+                system_instruction = {'role': 'user', 'parts': [{'text': msg.content}]}
+                continue
 
-		query = dict(self.default_query or {})
-		query.setdefault('key', google_api_key)
+            if isinstance(msg, UserMessage):
+                role = 'user'
+            elif isinstance(msg, AssistantMessage):
+                role = 'model'
+            else:
+                continue
 
-		base_url = self.base_url or 'https://generativelanguage.googleapis.com/v1beta/openai'
+            content = []
+            if isinstance(msg.content, str):
+                content.append({'text': msg.content})
+            elif isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, str):
+                         content.append({'text': item})
+                    elif isinstance(item, dict):
+                        if item.get('type') == 'text':
+                            content.append({'text': item.get('text', '')})
+                        elif item.get('type') == 'image_url':
+                             # Assuming image_url is a dict with 'url' key
+                             # and url is a base64 encoded image
+                            image_data = item.get('image_url', {}).get('url', '')
+                            if 'base64,' in image_data:
+                                mime_type = image_data.split(';')[0].split(':')[1]
+                                data = image_data.split('base64,')[1]
+                                content.append({'inline_data': {'mime_type': mime_type, 'data': data}})
 
-		self.api_key = google_api_key
-		self._delegate = ChatOpenAI(
-			model=self.model,
-			temperature=self.temperature,
-			frequency_penalty=self.frequency_penalty,
-			reasoning_effort=self.reasoning_effort,
-			seed=self.seed,
-			service_tier=self.service_tier,
-			top_p=self.top_p,
-			add_schema_to_system_prompt=self.add_schema_to_system_prompt,
-			api_key=google_api_key,
-			base_url=base_url,
-			timeout=self.timeout,
-			max_retries=self.max_retries,
-			default_headers=headers,
-			default_query=query,
-			http_client=self.http_client,
-			max_completion_tokens=self.max_output_tokens,
-		)
+            gemini_messages.append({'role': role, 'parts': content})
 
-	@property
-	def provider(self) -> str:
-		return 'google'
+        if system_instruction:
+            # Prepend system instruction to the conversation history as the first user message
+            gemini_messages.insert(0, system_instruction)
 
-	def get_client(self) -> AsyncOpenAI:
-		return self._delegate.get_client()
+        return gemini_messages
 
-	@property
-	def name(self) -> str:
-		return str(self.model)
+    async def _send_request(self, gemini_messages: list[dict[str, Any]]) -> httpx.Response:
+        url = f'{self.base_url}/models/{self.model}:generateContent'
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        json_payload = {
+            'contents': gemini_messages,
+            'generationConfig': {
+                'temperature': self.temperature,
+                'topP': self.top_p,
+                'maxOutputTokens': self.max_output_tokens,
+            },
+        }
 
-	@overload
-	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
+        params = {'key': self.api_key}
 
-	@overload
-	async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
+        for attempt in range(self.max_retries):
+            try:
+                response = await self._async_client.post(
+                    url, headers=headers, json=json_payload, params=params
+                )
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code >= 500 and attempt < self.max_retries - 1:
+                    continue
+                raise ModelProviderError(
+                    message=e.response.text,
+                    status_code=e.response.status_code,
+                    model=self.name,
+                ) from e
 
-	async def ainvoke(
-		self, messages: list[BaseMessage], output_format: type[T] | None = None
-	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
-		return await self._delegate.ainvoke(messages, output_format=output_format)
+        raise ModelProviderError(f"Failed to get response after {self.max_retries} retries", model=self.name)
+
+    @overload
+    async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
+
+    @overload
+    async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
+
+    async def ainvoke(
+        self, messages: list[BaseMessage], output_format: type[T] | None = None
+    ) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+        gemini_messages = self._prepare_messages(messages)
+        response = await self._send_request(gemini_messages)
+
+        response_data = response.json()
+
+        try:
+            content_text = response_data['candidates'][0]['content']['parts'][0]['text']
+        except (KeyError, IndexError):
+            raise ModelProviderError("Invalid response structure from Gemini API", model=self.name)
+
+        if output_format:
+            try:
+                parsed_content = self._parse_json_output(content_text, output_format)
+                return ChatInvokeCompletion(
+                    result=parsed_content,
+                    raw_completion=content_text,
+                    cost=None,
+                    token_usage=None,
+                    provider_name=self.provider,
+                    model_name=self.name,
+                )
+            except (json.JSONDecodeError, ValueError) as e:
+                raise ModelProviderError(f"Failed to parse model output as JSON: {e}", model=self.name) from e
+        else:
+            return ChatInvokeCompletion(
+                result=content_text,
+                raw_completion=content_text,
+                cost=None,
+                token_usage=None,
+                provider_name=self.provider,
+                model_name=self.name,
+            )
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client."""
+        if hasattr(self, '_async_client') and not self._async_client.is_closed:
+            await self._async_client.aclose()
+
+    def _parse_json_output(self, text: str, output_format: type[T]) -> T:
+        try:
+            json_start = text.index('{')
+            json_end = text.rindex('}') + 1
+            json_str = text[json_start:json_end]
+            data = json.loads(json_str)
+            return output_format(**data)
+        except (ValueError, json.JSONDecodeError) as e:
+            raise ValueError(f"Failed to decode JSON from model output: {text}") from e
