@@ -59,9 +59,9 @@ JSONのみで出力:
 
     try:
         # Use LLM to generate structured analysis
-        from browser_use.llm.messages import BaseMessage
+        from browser_use.llm.messages import UserMessage
 
-        messages = [BaseMessage(role='user', content=analysis_prompt)]
+        messages = [UserMessage(role='user', content=analysis_prompt)]
         response = await llm.ainvoke(messages)
 
         # Extract JSON from response
