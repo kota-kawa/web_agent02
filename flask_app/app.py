@@ -14,7 +14,6 @@ from .controller import BrowserAgentController
 from .env_utils import _AGENT_MAX_STEPS, _BROWSER_URL
 from .exceptions import AgentControllerError
 from .formatting import _format_history_messages, _summarize_history
-from browser_use.model_selection import update_override
 from .history import (
     _append_history_message,
     _broadcaster,
@@ -22,6 +21,8 @@ from .history import (
     _reset_history,
     _update_history_message,
 )
+from .models import SUPPORTED_MODELS
+from browser_use.model_selection import update_override
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -148,6 +149,11 @@ def index() -> str:
 @app.get('/api/history')
 def history() -> ResponseReturnValue:
     return jsonify({'messages': _copy_history()}), 200
+
+
+@app.get('/api/models')
+def get_models() -> ResponseReturnValue:
+    return jsonify(SUPPORTED_MODELS)
 
 
 @app.get('/api/stream')

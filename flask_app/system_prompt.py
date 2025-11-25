@@ -3,7 +3,25 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import re
+from datetime import datetime
+from pathlib import Path
+
 from .config import logger
+from browser_use.model_selection import _load_selection
+
+# List of models that are not multimodal and should not receive vision inputs
+NON_MULTIMODAL_MODELS = [
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5",
+    "claude-opus-4-5",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "moonshotai/kimi-k2-instruct-0905",
+    "qwen/qwen3-32b"
+]
 
 _LANGUAGE_EXTENSION = (
     '### 追加の言語ガイドライン\n'
@@ -51,6 +69,22 @@ def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS
     template = _load_custom_system_prompt_template()
     if not template:
         return None
+
+    selection = _load_selection("browser")
+    model = selection.get("model", "")
+
+    if model in NON_MULTIMODAL_MODELS:
+        # Remove vision-related sections for non-multimodal models
+        template = re.sub(r'<browser_vision>.*?</browser_vision>\n', '', template, flags=re.DOTALL)
+        # Adjust reasoning rules to remove dependency on screenshots
+        reasoning_rules_pattern = re.compile(r'(<reasoning_rules>.*?</reasoning_rules>)', re.DOTALL)
+        template = reasoning_rules_pattern.sub(
+            lambda m: m.group(1).replace(
+                'Always verify using <browser_vision> (screenshot) as the primary ground truth. If a screenshot is unavailable, fall back to <browser_state>.',
+                'Always verify the result of your actions using <browser_state> as the primary ground truth.'
+            ),
+            template
+        )
 
     current_datetime_line = datetime.now().strftime('現在の日時ー%Y年%m月%d日%H時%M分')
     try:

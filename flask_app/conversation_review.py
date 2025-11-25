@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import logger
 from .exceptions import AgentControllerError
-from .llm_setup import _create_gemini_llm
+from .llm_setup import _create_selected_llm
 
 
 async def _analyze_conversation_history_async(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -16,9 +16,9 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
     and whether the browser agent should proactively speak up.
     """
     try:
-        llm = _create_gemini_llm()
+        llm = _create_selected_llm()
     except AgentControllerError as exc:
-        logger.warning('Failed to create Gemini LLM for conversation analysis: %s', exc)
+        logger.warning('Failed to create LLM for conversation analysis: %s', exc)
         return {
             'needs_action': False,
             'action_type': None,
