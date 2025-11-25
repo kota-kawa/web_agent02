@@ -1,11 +1,11 @@
 import os
 from typing import TYPE_CHECKING
 
-from browser_use.model_selection import apply_model_selection
 from browser_use.logging_config import setup_logging
+from browser_use.model_selection import apply_model_selection
 
 # Ensure DEFAULT_LLM and OpenAI env vars reflect Multi-Agent-Platform settings
-apply_model_selection("browser")
+apply_model_selection('browser')
 
 # Only set up logging if not in MCP mode or if explicitly requested
 if os.environ.get('BROWSER_USE_SETUP_LOGGING', 'true').lower() != 'false':

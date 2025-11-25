@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, ClassVar, Generic, Literal, TypeVar
 from urllib.parse import urlparse
 
+from bubus import EventBus
+
 from browser_use.agent.cloud_events import (
 	CreateAgentOutputFileEvent,
 	CreateAgentSessionEvent,
@@ -21,12 +23,11 @@ from browser_use.agent.cloud_events import (
 )
 from browser_use.agent.eventbus import EventBusFactory
 from browser_use.agent.message_manager.utils import save_conversation
-from browser_use.llm.base import BaseChatModel
-from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
-from browser_use.llm.google.chat import ChatGoogle
 from browser_use.env_loader import load_secrets_env
+from browser_use.llm.base import BaseChatModel
+from browser_use.llm.google.chat import ChatGoogle
+from browser_use.llm.messages import BaseMessage, ContentPartImageParam, ContentPartTextParam, UserMessage
 from browser_use.tokens.service import TokenCost
-from bubus import EventBus
 
 load_secrets_env()
 
@@ -34,7 +35,6 @@ from pydantic import BaseModel, ValidationError
 from uuid_extensions import uuid7str
 
 from browser_use import Browser, BrowserProfile, BrowserSession
-from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 
 # Lazy import for gif to avoid heavy agent.views import at startup
 # from browser_use.agent.gif import create_history_gif
@@ -55,6 +55,7 @@ from browser_use.agent.views import (
 	BrowserStateHistory,
 	StepMetadata,
 )
+from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.session import DEFAULT_BROWSER_PROFILE
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.config import CONFIG
@@ -125,7 +126,6 @@ AgentHookFunc = Callable[['Agent'], Awaitable[None]]
 
 
 class Agent(Generic[Context, AgentStructuredOutput]):
-
 	_WATCHDOG_ATTR_NAMES: ClassVar[tuple[str, ...]] = (
 		'_downloads_watchdog',
 		'_storage_state_watchdog',
@@ -512,16 +512,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			return bus, reserved_name
 		except AssertionError as exc:
 			logger.warning(
-				'Failed to create named EventBus for agent %s (force_random=%s): %s. '
-				'Falling back to anonymous EventBus.',
+				'Failed to create named EventBus for agent %s (force_random=%s): %s. Falling back to anonymous EventBus.',
 				self.id,
 				force_random,
 				exc,
 			)
 		except Exception as exc:  # pragma: no cover - defensive logging
 			logger.exception(
-				'Unexpected error while creating EventBus for agent %s (force_random=%s); '
-				'falling back to anonymous EventBus.',
+				'Unexpected error while creating EventBus for agent %s (force_random=%s); falling back to anonymous EventBus.',
 				self.id,
 				force_random,
 			)
@@ -611,9 +609,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if fallback_triggered:
 			start_handlers = session.event_bus.handlers.get('BrowserStartEvent', [])
 			if not start_handlers:
-				raise RuntimeError(
-					'Browser session EventBus has no BrowserStartEvent handlers after fallback rotation'
-				)
+				raise RuntimeError('Browser session EventBus has no BrowserStartEvent handlers after fallback rotation')
 
 		if not reset_watchdogs:
 			return
@@ -1020,7 +1016,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# migrating away from a legacy identifier.
 			self._reset_eventbus()
 
-
 	def _current_step_number(self) -> int:
 		"""Return the current step number relative to the latest run."""
 
@@ -1139,9 +1134,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""Execute LLM interaction with retry logic and handle callbacks"""
 		input_messages = self._message_manager.get_messages()
 		current_step = self._current_step_number()
-		self.logger.debug(
-			f'🤖 Step {current_step}: Calling LLM with {len(input_messages)} messages (model: {self.llm.model})...'
-		)
+		self.logger.debug(f'🤖 Step {current_step}: Calling LLM with {len(input_messages)} messages (model: {self.llm.model})...')
 
 		try:
 			model_output = await asyncio.wait_for(
@@ -1194,16 +1187,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if self.state.last_result and len(self.state.last_result) == 1 and self.state.last_result[-1].error:
 			self.state.consecutive_failures += 1
 			current_step = self._current_step_number()
-			self.logger.debug(
-				f'🔄 Step {current_step}: Consecutive failures: {self.state.consecutive_failures}'
-			)
+			self.logger.debug(f'🔄 Step {current_step}: Consecutive failures: {self.state.consecutive_failures}')
 			return
 
 		self.state.consecutive_failures = 0
 		current_step = self._current_step_number()
-		self.logger.debug(
-			f'🔄 Step {current_step}: Consecutive failures reset to: {self.state.consecutive_failures}'
-		)
+		self.logger.debug(f'🔄 Step {current_step}: Consecutive failures reset to: {self.state.consecutive_failures}')
 
 		# Log completion results
 		if self.state.last_result and len(self.state.last_result) > 0 and self.state.last_result[-1].is_done:
@@ -1409,13 +1398,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				f'📸 Storing screenshot for step {current_step}, screenshot length: {len(browser_state_summary.screenshot)}'
 			)
 			storage_step = (
-				metadata.absolute_step_number
-				if metadata and metadata.absolute_step_number is not None
-				else self.state.n_steps
+				metadata.absolute_step_number if metadata and metadata.absolute_step_number is not None else self.state.n_steps
 			)
-			screenshot_path = await self.screenshot_service.store_screenshot(
-				browser_state_summary.screenshot, storage_step
-			)
+			screenshot_path = await self.screenshot_service.store_screenshot(browser_state_summary.screenshot, storage_step)
 			self.logger.debug(f'📸 Screenshot stored at: {screenshot_path}')
 		else:
 			current_step = metadata.step_number if metadata and metadata.step_number is not None else self._current_step_number()

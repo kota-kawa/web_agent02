@@ -12,10 +12,10 @@ from pydantic import Field, PrivateAttr
 
 from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.events import (
-        BrowserConnectedEvent,
-        BrowserErrorEvent,
-        BrowserStoppedEvent,
-        TabCreatedEvent,
+	BrowserConnectedEvent,
+	BrowserErrorEvent,
+	BrowserStoppedEvent,
+	TabCreatedEvent,
 )
 from browser_use.browser.watchdog_base import BaseWatchdog
 from browser_use.utils import is_default_new_tab_url, is_new_tab_page
@@ -309,14 +309,14 @@ class CrashWatchdog(BaseWatchdog):
 			for target in (await self.browser_session.cdp_client.send.Target.getTargets()).get('targetInfos', []):
 				if target.get('type') == 'page':
 					cdp_session = await self.browser_session.get_or_create_cdp_session(target_id=target.get('targetId'))
-                                        target_url = target.get('url')
-                                        if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
-                                                self.logger.debug(
-                                                        f'[CrashWatchdog] Redirecting chrome://new-tab-page/ to {DEFAULT_NEW_TAB_URL} {target.get("url")}'
-                                                )
-                                                await cdp_session.cdp_client.send.Page.navigate(
-                                                        params={'url': DEFAULT_NEW_TAB_URL}, session_id=cdp_session.session_id
-                                                )
+					target_url = target.get('url')
+					if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
+						self.logger.debug(
+							f'[CrashWatchdog] Redirecting chrome://new-tab-page/ to {DEFAULT_NEW_TAB_URL} {target.get("url")}'
+						)
+						await cdp_session.cdp_client.send.Page.navigate(
+							params={'url': DEFAULT_NEW_TAB_URL}, session_id=cdp_session.session_id
+						)
 
 			# Quick ping to check if session is alive
 			self.logger.debug(f'[CrashWatchdog] Attempting to run simple JS test expression in session {cdp_session} 1+1')
@@ -359,7 +359,7 @@ class CrashWatchdog(BaseWatchdog):
 			except Exception:
 				pass  # psutil not available or process doesn't exist
 
-        @staticmethod
-        def _is_new_tab_page(url: str) -> bool:
-                """Backwards compatibility helper for legacy imports."""
-                return is_new_tab_page(url)
+	@staticmethod
+	def _is_new_tab_page(url: str) -> bool:
+		"""Backwards compatibility helper for legacy imports."""
+		return is_new_tab_page(url)
