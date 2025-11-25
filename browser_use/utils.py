@@ -420,37 +420,37 @@ def is_unsafe_pattern(pattern: str) -> bool:
 
 
 def _normalize_new_tab_candidate(url: str) -> str:
-        """Normalize a URL candidate for new tab comparisons."""
+	"""Normalize a URL candidate for new tab comparisons."""
 
-        if not url:
-                return ''
+	if not url:
+		return ''
 
-        normalized = url.strip()
-        if not normalized:
-                return ''
+	normalized = url.strip()
+	if not normalized:
+		return ''
 
-        # Normalize case for comparisons and remove a single trailing slash so
-        # ``https://example.com`` and ``https://example.com/`` are treated the same.
-        normalized = normalized.rstrip('/')
-        return normalized.lower()
+	# Normalize case for comparisons and remove a single trailing slash so
+	# ``https://example.com`` and ``https://example.com/`` are treated the same.
+	normalized = normalized.rstrip('/')
+	return normalized.lower()
 
 
 def is_default_new_tab_url(url: str) -> bool:
-        """Return True if *url* matches the configured default new tab URL."""
+	"""Return True if *url* matches the configured default new tab URL."""
 
-        return _normalize_new_tab_candidate(url) == _normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL)
+	return _normalize_new_tab_candidate(url) == _normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL)
 
 
 def is_new_tab_page(url: str) -> bool:
-        """Return True if *url* should be treated as a browser new tab page."""
+	"""Return True if *url* should be treated as a browser new tab page."""
 
-        normalized = _normalize_new_tab_candidate(url)
-        return normalized in (
-                _normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL),
-                'about:blank',
-                'chrome://new-tab-page',
-                'chrome://newtab',
-        )
+	normalized = _normalize_new_tab_candidate(url)
+	return normalized in (
+		_normalize_new_tab_candidate(DEFAULT_NEW_TAB_URL),
+		'about:blank',
+		'chrome://new-tab-page',
+		'chrome://newtab',
+	)
 
 
 def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: bool = False) -> bool:

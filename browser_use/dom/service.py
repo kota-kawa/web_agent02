@@ -177,9 +177,7 @@ class DomService:
 				and self.browser_session.agent_focus.target_id != previous_focus_target
 			):
 				try:
-					await self.browser_session.get_or_create_cdp_session(
-						target_id=previous_focus_target, focus=True
-					)
+					await self.browser_session.get_or_create_cdp_session(target_id=previous_focus_target, focus=True)
 				except Exception as restore_error:
 					self.logger.debug(f'Failed to restore focus after viewport lookup: {restore_error}')
 

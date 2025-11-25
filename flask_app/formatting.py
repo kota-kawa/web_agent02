@@ -5,190 +5,186 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
-    from browser_use.browser.views import BrowserStateSummary
+	from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
+	from browser_use.browser.views import BrowserStateSummary
 except ModuleNotFoundError:
-    import sys
+	import sys
 
-    ROOT_DIR = Path(__file__).resolve().parents[1]
-    if str(ROOT_DIR) not in sys.path:
-        sys.path.insert(0, str(ROOT_DIR))
-    from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
-    from browser_use.browser.views import BrowserStateSummary
+	ROOT_DIR = Path(__file__).resolve().parents[1]
+	if str(ROOT_DIR) not in sys.path:
+		sys.path.insert(0, str(ROOT_DIR))
+	from browser_use.agent.views import ActionResult, AgentHistoryList, AgentOutput
+	from browser_use.browser.views import BrowserStateSummary
 
 _FINAL_RESPONSE_NOTICE = '※ ブラウザエージェントの応答はここで終了です。'
 _FINAL_RESPONSE_MARKER = '[browser-agent-final]'
 
 
 def _append_final_response_notice(message: str) -> str:
-    """Append a human/machine readable marker signalling that output is final."""
+	"""Append a human/machine readable marker signalling that output is final."""
 
-    base = (message or '').strip()
-    if _FINAL_RESPONSE_MARKER in base:
-        return base
-    notice = f'{_FINAL_RESPONSE_NOTICE} {_FINAL_RESPONSE_MARKER}'.strip()
-    if base:
-        return f'{base}\n\n{notice}'
-    return notice
+	base = (message or '').strip()
+	if _FINAL_RESPONSE_MARKER in base:
+		return base
+	notice = f'{_FINAL_RESPONSE_NOTICE} {_FINAL_RESPONSE_MARKER}'.strip()
+	if base:
+		return f'{base}\n\n{notice}'
+	return notice
 
 
 def _compact_text(text: str) -> str:
-    return ' '.join(text.split())
+	return ' '.join(text.split())
 
 
 def _truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1] + '…'
+	if len(text) <= limit:
+		return text
+	return text[: limit - 1] + '…'
 
 
 def _stringify_value(value: Any, limit: int = 60) -> str:
-    if isinstance(value, str):
-        cleaned = _compact_text(value)
-    elif isinstance(value, (dict, list)):
-        try:
-            cleaned = _compact_text(json.dumps(value, ensure_ascii=False))
-        except TypeError:
-            cleaned = _compact_text(str(value))
-    else:
-        cleaned = _compact_text(str(value))
-    return _truncate(cleaned, limit)
+	if isinstance(value, str):
+		cleaned = _compact_text(value)
+	elif isinstance(value, (dict, list)):
+		try:
+			cleaned = _compact_text(json.dumps(value, ensure_ascii=False))
+		except TypeError:
+			cleaned = _compact_text(str(value))
+	else:
+		cleaned = _compact_text(str(value))
+	return _truncate(cleaned, limit)
 
 
 def _format_action(action) -> str:
-    action_dump = action.model_dump(exclude_none=True)
-    if not action_dump:
-        return '不明なアクション'
+	action_dump = action.model_dump(exclude_none=True)
+	if not action_dump:
+		return '不明なアクション'
 
-    name, params = next(iter(action_dump.items()))
-    if not isinstance(params, dict) or not params:
-        return name
+	name, params = next(iter(action_dump.items()))
+	if not isinstance(params, dict) or not params:
+		return name
 
-    param_parts = []
-    for key, value in params.items():
-        if value is None:
-            continue
-        param_parts.append(f'{key}={_stringify_value(value)}')
+	param_parts = []
+	for key, value in params.items():
+		if value is None:
+			continue
+		param_parts.append(f'{key}={_stringify_value(value)}')
 
-    joined = ', '.join(param_parts)
-    return f'{name}({joined})' if joined else name
+	joined = ', '.join(param_parts)
+	return f'{name}({joined})' if joined else name
 
 
 def _format_result(result: ActionResult) -> str:
-    if result.error:
-        return _truncate(_compact_text(result.error), 160)
+	if result.error:
+		return _truncate(_compact_text(result.error), 160)
 
-    segments: list[str] = []
-    if result.is_done:
-        status = '成功' if result.success else '失敗'
-        segments.append(f'完了[{status}]')
-    if result.extracted_content:
-        segments.append(_truncate(_compact_text(result.extracted_content), 160))
-    if result.long_term_memory:
-        segments.append(_truncate(_compact_text(result.long_term_memory), 160))
-    if not segments and result.metadata:
-        try:
-            metadata_text = json.dumps(result.metadata, ensure_ascii=False)
-        except TypeError:
-            metadata_text = str(result.metadata)
-        segments.append(_truncate(_compact_text(metadata_text), 120))
+	segments: list[str] = []
+	if result.is_done:
+		status = '成功' if result.success else '失敗'
+		segments.append(f'完了[{status}]')
+	if result.extracted_content:
+		segments.append(_truncate(_compact_text(result.extracted_content), 160))
+	if result.long_term_memory:
+		segments.append(_truncate(_compact_text(result.long_term_memory), 160))
+	if not segments and result.metadata:
+		try:
+			metadata_text = json.dumps(result.metadata, ensure_ascii=False)
+		except TypeError:
+			metadata_text = str(result.metadata)
+		segments.append(_truncate(_compact_text(metadata_text), 120))
 
-    return ' / '.join(segments) if segments else ''
+	return ' / '.join(segments) if segments else ''
 
 
 def _format_step_entry(index: int, step: Any) -> str:
-    lines: list[str] = [f'ステップ{index}']
-    state = getattr(step, 'state', None)
-    if state:
-        page_parts: list[str] = []
-        if getattr(state, 'title', None):
-            page_parts.append(_truncate(_compact_text(state.title), 80))
-        if getattr(state, 'url', None):
-            page_parts.append(state.url)
-        if page_parts:
-            lines.append('ページ: ' + ' / '.join(page_parts))
+	lines: list[str] = [f'ステップ{index}']
+	state = getattr(step, 'state', None)
+	if state:
+		page_parts: list[str] = []
+		if getattr(state, 'title', None):
+			page_parts.append(_truncate(_compact_text(state.title), 80))
+		if getattr(state, 'url', None):
+			page_parts.append(state.url)
+		if page_parts:
+			lines.append('ページ: ' + ' / '.join(page_parts))
 
-    model_output = getattr(step, 'model_output', None)
-    if model_output:
-        action_lines = [_format_action(action) for action in model_output.action]
-        if action_lines:
-            lines.append('アクション: ' + ' / '.join(action_lines))
-        if model_output.evaluation_previous_goal:
-            lines.append(
-                '評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120)
-            )
-        if model_output.next_goal:
-            lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+	model_output = getattr(step, 'model_output', None)
+	if model_output:
+		action_lines = [_format_action(action) for action in model_output.action]
+		if action_lines:
+			lines.append('アクション: ' + ' / '.join(action_lines))
+		if model_output.evaluation_previous_goal:
+			lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
+		if model_output.next_goal:
+			lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
 
-    result_lines = [text for text in (_format_result(r) for r in getattr(step, 'result', [])) if text]
-    if result_lines:
-        lines.append('結果: ' + ' / '.join(result_lines))
+	result_lines = [text for text in (_format_result(r) for r in getattr(step, 'result', [])) if text]
+	if result_lines:
+		lines.append('結果: ' + ' / '.join(result_lines))
 
-    return '\n'.join(lines)
+	return '\n'.join(lines)
 
 
 def _format_history_messages(history: AgentHistoryList) -> list[tuple[int, str]]:
-    formatted: list[tuple[int, str]] = []
-    next_index = 1
-    for step in history.history:
-        metadata = getattr(step, 'metadata', None)
-        step_number = getattr(metadata, 'step_number', None) if metadata else None
-        if not isinstance(step_number, int) or step_number < 1:
-            step_number = next_index
-        formatted.append((step_number, _format_step_entry(step_number, step)))
-        next_index = step_number + 1
-    return formatted
+	formatted: list[tuple[int, str]] = []
+	next_index = 1
+	for step in history.history:
+		metadata = getattr(step, 'metadata', None)
+		step_number = getattr(metadata, 'step_number', None) if metadata else None
+		if not isinstance(step_number, int) or step_number < 1:
+			step_number = next_index
+		formatted.append((step_number, _format_step_entry(step_number, step)))
+		next_index = step_number + 1
+	return formatted
 
 
 def _format_step_plan(
-    step_number: int,
-    state: BrowserStateSummary,
-    model_output: AgentOutput,
+	step_number: int,
+	state: BrowserStateSummary,
+	model_output: AgentOutput,
 ) -> str:
-    lines: list[str] = [f'ステップ{step_number} 計画']
+	lines: list[str] = [f'ステップ{step_number} 計画']
 
-    page_parts: list[str] = []
-    if state.title:
-        page_parts.append(_truncate(_compact_text(state.title), 80))
-    if state.url:
-        page_parts.append(state.url)
-    if page_parts:
-        lines.append('ページ: ' + ' / '.join(page_parts))
+	page_parts: list[str] = []
+	if state.title:
+		page_parts.append(_truncate(_compact_text(state.title), 80))
+	if state.url:
+		page_parts.append(state.url)
+	if page_parts:
+		lines.append('ページ: ' + ' / '.join(page_parts))
 
-    action_lines = [_format_action(action) for action in model_output.action]
-    if action_lines:
-        lines.append('アクション候補: ' + ' / '.join(action_lines))
-    if model_output.evaluation_previous_goal:
-        lines.append(
-            '評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120)
-        )
-    if model_output.memory:
-        lines.append('メモリ: ' + _truncate(_compact_text(model_output.memory), 120))
-    if model_output.next_goal:
-        lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+	action_lines = [_format_action(action) for action in model_output.action]
+	if action_lines:
+		lines.append('アクション候補: ' + ' / '.join(action_lines))
+	if model_output.evaluation_previous_goal:
+		lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
+	if model_output.memory:
+		lines.append('メモリ: ' + _truncate(_compact_text(model_output.memory), 120))
+	if model_output.next_goal:
+		lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
 
-    return '\n'.join(lines)
+	return '\n'.join(lines)
 
 
 def _summarize_history(history: AgentHistoryList) -> str:
-    total_steps = len(history.history)
-    success = history.is_successful()
-    if success is True:
-        prefix, status = '✅', '成功'
-    elif success is False:
-        prefix, status = '⚠️', '失敗'
-    else:
-        prefix, status = 'ℹ️', '未確定'
+	total_steps = len(history.history)
+	success = history.is_successful()
+	if success is True:
+		prefix, status = '✅', '成功'
+	elif success is False:
+		prefix, status = '⚠️', '失敗'
+	else:
+		prefix, status = 'ℹ️', '未確定'
 
-    lines = [f'{prefix} {total_steps}ステップでエージェントが実行されました（結果: {status}）。']
+	lines = [f'{prefix} {total_steps}ステップでエージェントが実行されました（結果: {status}）。']
 
-    final_text = history.final_result()
-    if final_text:
-        lines.append('最終報告: ' + _truncate(_compact_text(final_text), 200))
+	final_text = history.final_result()
+	if final_text:
+		lines.append('最終報告: ' + _truncate(_compact_text(final_text), 200))
 
-    if history.history:
-        last_state = history.history[-1].state
-        if last_state and last_state.url:
-            lines.append(f'最終URL: {last_state.url}')
+	if history.history:
+		last_state = history.history[-1].state
+		if last_state and last_state.url:
+			lines.append(f'最終URL: {last_state.url}')
 
-    return _append_final_response_notice('\n'.join(lines))
+	return _append_final_response_notice('\n'.join(lines))

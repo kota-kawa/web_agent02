@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 from browser_use.env_loader import load_secrets_env
-
 from browser_use.llm.anthropic.chat import ChatAnthropic
 from browser_use.llm.google.chat import ChatGoogle
 from browser_use.llm.openai.chat import ChatOpenAI
@@ -961,6 +960,7 @@ class BrowserUseApp(App):
 
 		# Run the worker
 		self.run_worker(agent_task_worker, name='agent_task')
+
 	def action_input_history_prev(self) -> None:
 		"""Navigate to the previous item in command history."""
 		# Only process if we have history and input is focused

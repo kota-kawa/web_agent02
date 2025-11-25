@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING, ClassVar
 from bubus import BaseEvent
 
 from browser_use.browser.events import (
-        BrowserErrorEvent,
-        NavigateToUrlEvent,
-        NavigationCompleteEvent,
-        TabCreatedEvent,
+	BrowserErrorEvent,
+	NavigateToUrlEvent,
+	NavigationCompleteEvent,
+	TabCreatedEvent,
 )
 from browser_use.browser.watchdog_base import BaseWatchdog
 from browser_use.utils import is_new_tab_page
@@ -137,8 +137,8 @@ class SecurityWatchdog(BaseWatchdog):
 			return True
 
 		# Always allow internal browser targets
-                if is_new_tab_page(url):
-                        return True
+		if is_new_tab_page(url):
+			return True
 
 		# Parse the URL to extract components
 		from urllib.parse import urlparse

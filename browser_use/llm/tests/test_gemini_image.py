@@ -67,7 +67,7 @@ async def test_gemini_image_vision():
 		),
 	]
 
-        print('Testing Gemini image vision...')
+	print('Testing Gemini image vision...')
 
 	# Make the API call
 	try:
