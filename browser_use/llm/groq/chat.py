@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeVar, overload
 
 from groq import (
@@ -71,10 +71,24 @@ class ChatGroq(BaseChatModel):
 	api_key: str | None = None
 	base_url: str | URL | None = None
 	timeout: float | Timeout | NotGiven | None = None
-	max_retries: int = 10  # Increase default retries for automation reliability
+	max_retries: int = 10
+
+	_async_client: AsyncGroq = field(init=False, repr=False)
+
+	def __post_init__(self) -> None:
+		# The Groq SDK automatically appends '/openai/v1', so we remove it from the base_url if present
+		client_base_url = self.base_url
+		if isinstance(client_base_url, str) and client_base_url.endswith('/openai/v1'):
+			client_base_url = client_base_url.removesuffix('/openai/v1')
+		elif isinstance(client_base_url, URL) and client_base_url.path.endswith('/openai/v1'):
+			client_base_url = client_base_url.copy_with(path=client_base_url.path.removesuffix('/openai/v1'))
+
+		self._async_client = AsyncGroq(
+			api_key=self.api_key, base_url=client_base_url, timeout=self.timeout, max_retries=self.max_retries
+		)
 
 	def get_client(self) -> AsyncGroq:
-		return AsyncGroq(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, max_retries=self.max_retries)
+		return self._async_client
 
 	@property
 	def provider(self) -> str:
@@ -227,3 +241,8 @@ class ChatGroq(BaseChatModel):
 			),
 			service_tier=self.service_tier,
 		)
+
+	async def aclose(self) -> None:
+		"""Close the underlying HTTP client."""
+		if hasattr(self, '_async_client') and not self._async_client.is_closed:
+			await self._async_client.aclose()

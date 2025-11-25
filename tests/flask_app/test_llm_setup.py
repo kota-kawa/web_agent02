@@ -17,8 +17,8 @@ from browser_use.llm.base import BaseChatModel
 @pytest.fixture(autouse=True)
 def mock_api_keys():
     original_environ = dict(os.environ)
-    os.environ['GOOGLE_API_KEY'] = 'test_google_key'
-    os.environ['ANTHROPIC_API_KEY'] = 'test_anthropic_key'
+    os.environ['GEMINI_API_KEY'] = 'test_gemini_key'
+    os.environ['CLAUDE_API_KEY'] = 'test_claude_key'
     os.environ['GROQ_API_KEY'] = 'test_groq_key'
     os.environ['OPENAI_API_KEY'] = 'test_openai_key'
     yield
@@ -29,10 +29,10 @@ def mock_api_keys():
 @pytest.mark.parametrize(
     "provider, model, expected_client",
     [
-        ("google", "gemini-1.5-pro", ChatGoogle),
-        ("anthropic", "claude-3-opus-20240229", ChatAnthropic),
-        ("groq", "llama3-70b-8192", ChatGroq),
-        ("openai", "gpt-4-turbo", ChatOpenAI),
+        ("gemini", "gemini-2.5-flash", ChatGoogle),
+        ("claude", "claude-sonnet-4-5", ChatAnthropic),
+        ("groq", "llama-3.3-70b-versatile", ChatGroq),
+        ("openai", "gpt-4.1", ChatOpenAI),
     ],
 )
 def test_create_selected_llm_providers(provider, model, expected_client):
@@ -77,8 +77,8 @@ def test_gemini_with_openai_compatible_base_url():
     OpenAI-compatible base_url. This is the key fix being tested.
     """
     selection = {
-        "provider": "google",
-        "model": "gemini-1.5-pro",
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
         "base_url": "https://generativelanguage.googleapis.com/openai/v1"
     }
 
@@ -90,8 +90,8 @@ def test_gemini_with_openai_compatible_base_url():
         mock_update.return_value = selection
 
         # Mock the provider defaults to simulate the real configuration
-        mock_provider_defaults.get.return_value = {'api_key_env': 'GOOGLE_API_KEY'}
+        mock_provider_defaults.get.return_value = {'api_key_env': 'GEMINI_API_KEY'}
 
         llm_instance = _create_selected_llm(selection_override=selection)
 
-        assert isinstance(llm_instance, ChatGoogle), "Provider 'google' should always return a ChatGoogle client"
+        assert isinstance(llm_instance, ChatGoogle), "Provider 'gemini' should always return a ChatGoogle client"

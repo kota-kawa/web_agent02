@@ -15,6 +15,7 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
 	Analyze conversation history using LLM to determine if browser operations are needed
 	and whether the browser agent should proactively speak up.
 	"""
+	llm = None
 	try:
 		llm = _create_selected_llm()
 	except AgentControllerError as exc:
@@ -59,13 +60,16 @@ JSONのみで出力:
 
 	try:
 		# Use LLM to generate structured analysis
-		from browser_use.llm.messages import UserMessage
+		from browser_use.llm.messages import UserMessage, SystemMessage
 
-		messages = [UserMessage(role='user', content=analysis_prompt)]
+		messages = [
+			SystemMessage(content='You are an expert in analyzing conversations.'),
+			UserMessage(role='user', content=analysis_prompt),
+		]
 		response = await llm.ainvoke(messages)
 
 		# Extract JSON from response
-		response_text = response.content if hasattr(response, 'content') else str(response)
+		response_text = response.result if hasattr(response, 'result') else str(response)
 
 		# Try to parse JSON from the response
 		# Sometimes LLM wraps JSON in markdown code blocks
@@ -132,6 +136,9 @@ JSONのみで出力:
 			'task_description': None,
 			'reason': f'予期しないエラーが発生しました: {exc}',
 		}
+	finally:
+		if llm:
+			await llm.aclose()
 
 
 def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
