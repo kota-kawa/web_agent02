@@ -75,10 +75,10 @@ class AboutBlankWatchdog(BaseWatchdog):
 				'[AboutBlankWatchdog] Last tab closing, creating new about:blank tab to avoid closing entire browser'
 			)
 			# Create the animation tab since no tabs should remain
-                        navigate_event = self.event_bus.dispatch(
-                                NavigateToUrlEvent(url=DEFAULT_NEW_TAB_URL, new_tab=True)
-                        )
-                        await navigate_event
+			navigate_event = self.event_bus.dispatch(
+				NavigateToUrlEvent(url=DEFAULT_NEW_TAB_URL, new_tab=True)
+			)
+			await navigate_event
 			# Show DVD screensaver on the new tab
 			await self._show_dvd_screensaver_on_about_blank_tabs()
 		else:
@@ -98,11 +98,11 @@ class AboutBlankWatchdog(BaseWatchdog):
 			# If no tabs exist at all, create one to keep browser alive
 			if len(page_targets) == 0:
 				# Only create a new tab if there are no tabs at all
-                                self.logger.debug('[AboutBlankWatchdog] No tabs exist, creating new start page tab')
-                                navigate_event = self.event_bus.dispatch(
-                                        NavigateToUrlEvent(url=DEFAULT_NEW_TAB_URL, new_tab=True)
-                                )
-                                await navigate_event
+				self.logger.debug('[AboutBlankWatchdog] No tabs exist, creating new start page tab')
+				navigate_event = self.event_bus.dispatch(
+					NavigateToUrlEvent(url=DEFAULT_NEW_TAB_URL, new_tab=True)
+				)
+				await navigate_event
 				# Show DVD screensaver on the new tab
 				await self._show_dvd_screensaver_on_about_blank_tabs()
 			# Otherwise there are tabs, don't create new ones to avoid interfering

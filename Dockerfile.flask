@@ -5,11 +5,21 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY flask_app/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy local browser_use package files
+COPY pyproject.toml README.md ./
+COPY browser_use/ browser_use/
 
+# Copy flask requirements
+COPY flask_app/requirements.txt ./
+
+# Install flask requirements and local browser_use package
+# We install requirements first (which might pull browser-use from PyPI)
+# Then we install the local package to ensure we use the local version
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir .
+
+# Copy flask application code
 COPY flask_app/ ./
-COPY system_prompt_browser_agent.md ./system_prompt_browser_agent.md
 
 ENV FLASK_APP=app.py \
     FLASK_RUN_HOST=0.0.0.0 \
