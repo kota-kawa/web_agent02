@@ -45,12 +45,17 @@
     <main class="layout">
       <section class="chat-pane" aria-label="チャット領域">
         <div class="chat-pane__content">
-          <header class="chat-header chat-header--compact">
+          <header class="chat-header">
             <div class="chat-header-main">
               <h1>チャット</h1>
               <div id="status" class="status" role="status" aria-live="polite" data-variant="muted"></div>
             </div>
             <div class="chat-header-side">
+              <div class="model-selector-group">
+                <label for="model-selector">AIモデル</label>
+                <select id="model-selector" name="model">
+                </select>
+              </div>
               <div
                 id="connection-indicator"
                 class="connection-indicator"
@@ -141,6 +146,7 @@
       const newTaskButton = document.getElementById('new-task-button');
       const quickPrompts = document.querySelectorAll('[data-prompt]');
       const connectionIndicator = document.getElementById('connection-indicator');
+      const modelSelector = document.getElementById('model-selector');
 
       let conversation = [];
       let eventSource;
@@ -268,6 +274,58 @@
       setStatus('', 'muted');
       setConnectionState('idle');
       updateEmptyState();
+
+      async function loadModels() {
+        if (!modelSelector) {
+          return;
+        }
+        try {
+          const response = await fetch('/api/models');
+          if (!response.ok) {
+            throw new Error('モデルの取得に失敗しました。');
+          }
+          const models = await response.json();
+          modelSelector.innerHTML = '';
+          models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({ provider: model.provider, model: model.model });
+            option.textContent = model.label;
+            modelSelector.appendChild(option);
+          });
+        } catch (error) {
+          setStatus(error.message, 'error');
+        }
+      }
+
+      async function applyModelSelection(selection) {
+        try {
+          const response = await fetch('/model_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(selection),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'モデル設定の適用に失敗しました。');
+          }
+          setStatus(`モデルを ${selection.label || selection.model} に変更しました。`, 'success');
+        } catch (error) {
+          setStatus(error.message, 'error');
+        }
+      }
+
+      if (modelSelector) {
+        modelSelector.addEventListener('change', () => {
+          try {
+            const selectedOption = modelSelector.options[modelSelector.selectedIndex];
+            const selection = JSON.parse(selectedOption.value);
+            selection.label = selectedOption.textContent;
+            applyModelSelection(selection);
+          } catch (error) {
+            setStatus('モデル設定の解析に失敗しました。', 'error');
+          }
+        });
+      }
 
       function renderMessageContent(element, content) {
         if (!element) {
@@ -670,6 +728,7 @@
 
       setupEventStream();
       loadHistory();
+      loadModels();
       updatePauseButtonState();
 
       // Ensure the embedded noVNC session fills the browser pane
