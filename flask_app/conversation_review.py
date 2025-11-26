@@ -138,7 +138,10 @@ JSONのみで出力:
 		}
 	finally:
 		if llm:
-			await llm.aclose()
+			try:
+				await llm.aclose()
+			except Exception:
+				logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
 
 
 def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
