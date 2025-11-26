@@ -9,7 +9,7 @@ sleep 5
 
 # Try multiple times in case the window is not immediately available.
 for _ in {1..10}; do
-    if wmctrl -r "Chrome" -b add,maximized_vert,maximized_horz; then
+    if wmctrl -r "Chrome" -b add,maximized_vert,maximized_horz 2>/dev/null; then
         break
     fi
     sleep 1
