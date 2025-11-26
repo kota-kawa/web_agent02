@@ -95,7 +95,7 @@ JSONのみで出力:
 		response = await llm.ainvoke(messages, output_format=ConversationAnalysis)
 
 		# The response result should now be a Pydantic model instance
-		analysis_result = response.result
+		analysis_result = response.completion
 
 		if not isinstance(analysis_result, ConversationAnalysis):
 			raise TypeError(f'Expected ConversationAnalysis, but got {type(analysis_result).__name__}')
