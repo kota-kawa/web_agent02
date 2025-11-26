@@ -49,7 +49,16 @@ def _create_selected_llm(selection_override: dict | None = None) -> BaseChatMode
 	if not api_key:
 		raise AgentControllerError(f'{api_key_env} が設定されていません。ブラウザエージェントの secrets.env を確認してください。')
 
-	llm_kwargs: dict[str, Any] = {'model': model, 'api_key': api_key}
+	provider_to_api_key_arg = {
+		'gemini': 'api_key',
+		'claude': 'api_key',
+		'groq': 'api_key',
+		'openai': 'api_key',
+	}
+	api_key_arg = provider_to_api_key_arg.get(provider, 'api_key')
+
+	llm_kwargs: dict[str, Any] = {'model': model, api_key_arg: api_key}
+
 	if base_url:
 		llm_kwargs['base_url'] = base_url
 
