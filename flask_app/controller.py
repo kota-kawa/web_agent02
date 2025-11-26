@@ -704,6 +704,35 @@ class BrowserAgentController:
 			if self._browser_session is not None:
 				self._start_page_ready = True
 
+	def update_llm(self) -> None:
+		"""Update the LLM instance based on current global settings."""
+		try:
+			new_llm = _create_selected_llm()
+		except Exception as exc:
+			raise AgentControllerError(f'新しいモデルの作成に失敗しました: {exc}') from exc
+
+		async def _apply_update() -> None:
+			with self._state_lock:
+				old_llm = self._llm
+				self._llm = new_llm
+
+				if self._agent:
+					self._agent.llm = new_llm
+				if self._current_agent and self._current_agent is not self._agent:
+					self._current_agent.llm = new_llm
+
+			if old_llm:
+				aclose = getattr(old_llm, 'aclose', None)
+				if callable(aclose):
+					with suppress(Exception):
+						await aclose()
+
+		future = asyncio.run_coroutine_threadsafe(_apply_update(), self._loop)
+		try:
+			future.result(timeout=10)
+		except Exception as exc:
+			raise AgentControllerError(f'モデルの更新処理に失敗しました: {exc}') from exc
+
 	def reset(self) -> None:
 		with self._state_lock:
 			if self._is_running:

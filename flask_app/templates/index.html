@@ -286,7 +286,10 @@
           if (!response.ok) {
             throw new Error('モデルの取得に失敗しました。');
           }
-          const models = await response.json();
+          const data = await response.json();
+          const models = Array.isArray(data) ? data : Array.isArray(data.models) ? data.models : [];
+          const current = !Array.isArray(data) && typeof data.current === 'object' ? data.current : null;
+
           modelSelector.innerHTML = '';
           models.forEach(model => {
             const option = document.createElement('option');
@@ -294,6 +297,17 @@
             option.textContent = model.label;
             modelSelector.appendChild(option);
           });
+
+          const desired = current && current.provider && current.model
+            ? JSON.stringify({ provider: current.provider, model: current.model })
+            : null;
+          const hasDesired = desired && Array.from(modelSelector.options).some(opt => opt.value === desired);
+
+          if (hasDesired) {
+            modelSelector.value = desired;
+          } else if (modelSelector.options.length) {
+            modelSelector.selectedIndex = 0;
+          }
         } catch (error) {
           setStatus(error.message, 'error');
         }

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 from flask.typing import ResponseReturnValue
 
-from browser_use.model_selection import update_override
+from browser_use.model_selection import apply_model_selection, update_override
 
 from .cdp import _consume_cdp_session_cleanup, _resolve_cdp_url
 from .config import APP_STATIC_DIR, logger
@@ -146,7 +147,13 @@ def history() -> ResponseReturnValue:
 
 @app.get('/api/models')
 def get_models() -> ResponseReturnValue:
-	return jsonify(SUPPORTED_MODELS)
+	current = apply_model_selection('browser')
+	return jsonify(
+		{
+			'models': SUPPORTED_MODELS,
+			'current': {'provider': current['provider'], 'model': current['model'], 'base_url': current.get('base_url', '')},
+		}
+	)
 
 
 @app.get('/api/stream')
@@ -174,8 +181,14 @@ def update_model_settings() -> ResponseReturnValue:
 	payload = request.get_json(silent=True) or {}
 	selection = payload if isinstance(payload, dict) else {}
 	try:
+		# Save selection to local_model_settings.json for persistence
+		local_path = Path('local_model_settings.json')
+		with open(local_path, 'w', encoding='utf-8') as f:
+			json.dump(selection, f, ensure_ascii=False, indent=2)
+
 		update_override(selection if selection else None)
-		_reset_agent_controller()
+		if _AGENT_CONTROLLER is not None:
+			_AGENT_CONTROLLER.update_llm()
 	except Exception as exc:
 		logger.exception('Failed to apply model settings: %s', exc)
 		return jsonify({'error': 'モデル設定の更新に失敗しました。'}), 500

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_SELECTION = {'provider': 'openai', 'model': 'gpt-4.1-2025-04-14'}
+DEFAULT_SELECTION = {'provider': 'openai', 'model': 'gpt-4.1'}
 
 PROVIDER_DEFAULTS: dict[str, dict[str, str | None]] = {
 	'openai': {'api_key_env': 'OPENAI_API_KEY', 'base_url_env': 'OPENAI_BASE_URL', 'default_base_url': None},
@@ -31,6 +31,16 @@ _OVERRIDE_SELECTION: dict[str, str] | None = None
 
 
 def _load_selection(agent_key: str) -> dict[str, str]:
+	# Try local cache first (for Docker/persistence)
+	local_path = Path('local_model_settings.json')
+	if local_path.is_file():
+		try:
+			data = json.loads(local_path.read_text(encoding='utf-8'))
+			if isinstance(data, dict) and data.get('provider') and data.get('model'):
+				return {'provider': data['provider'], 'model': data['model']}
+		except (OSError, json.JSONDecodeError):
+			pass
+
 	platform_path = Path(__file__).resolve().parents[2] / 'Multi-Agent-Platform' / 'model_settings.json'
 	try:
 		data = json.loads(platform_path.read_text(encoding='utf-8'))
@@ -50,6 +60,44 @@ def _load_selection(agent_key: str) -> dict[str, str]:
 	return {'provider': provider, 'model': model}
 
 
+def _normalize_base_url(provider: str, base_url: str | None, explicit: bool = False) -> str:
+	"""Strip provider-mismatched base URLs left over from previous selections.
+
+	`explicit=True` means the caller intentionally set the base_url (e.g. via UI),
+	so we preserve it unless it's empty. Environment-derived values are treated
+	as best-effort hints and filtered if they clearly belong to a different
+	provider (e.g. Groq URL while OpenAI is selected).
+	"""
+
+	if not base_url:
+		return ''
+
+	normalized = base_url.strip().rstrip('/')
+	if not normalized:
+		return ''
+
+	provider_defaults = {
+		key: (cfg.get('default_base_url') or '').rstrip('/')
+		for key, cfg in PROVIDER_DEFAULTS.items()
+		if cfg.get('default_base_url')
+	}
+	current_default = provider_defaults.get(provider, '')
+	other_defaults = {val for key, val in provider_defaults.items() if key != provider}
+
+	# Force cleanup of known provider mismatches, even if explicit=True
+	if provider != 'groq' and 'api.groq.com' in normalized:
+		return ''
+	if provider != 'gemini' and 'generativelanguage.googleapis.com' in normalized:
+		return ''
+
+	if not explicit:
+		# Avoid reusing obvious cross-provider URLs (e.g. Groq -> OpenAI)
+		if normalized in other_defaults:
+			return ''
+
+	return normalized or current_default
+
+
 def apply_model_selection(agent_key: str = 'browser', override: dict[str, str] | None = None) -> dict[str, str]:
 	"""Set env vars DEFAULT_LLM/OPENAI_API_KEY/OPENAI_BASE_URL according to selection."""
 
@@ -61,15 +109,36 @@ def apply_model_selection(agent_key: str = 'browser', override: dict[str, str] |
 	api_key_env = meta.get('api_key_env') or 'OPENAI_API_KEY'
 	base_url_env = meta.get('base_url_env') or ''
 
+	# Handle OPENAI_API_KEY backup/restore to prevent overwriting with other provider keys
+	if provider == 'openai':
+		if '_ORIGINAL_OPENAI_API_KEY' in os.environ:
+			os.environ['OPENAI_API_KEY'] = os.environ['_ORIGINAL_OPENAI_API_KEY']
+
 	api_key = os.getenv(api_key_env) or os.getenv(api_key_env.lower()) or os.getenv('OPENAI_API_KEY')
 	if api_key:
+		if provider != 'openai':
+			# If we are switching away from OpenAI, backup the original key if it exists
+			if 'OPENAI_API_KEY' in os.environ and '_ORIGINAL_OPENAI_API_KEY' not in os.environ:
+				os.environ['_ORIGINAL_OPENAI_API_KEY'] = os.environ['OPENAI_API_KEY']
+
 		os.environ['OPENAI_API_KEY'] = api_key
 
-	base_url = os.getenv(base_url_env, '') if base_url_env else ''
-	if not base_url:
+	base_url_provided = 'base_url' in selection
+	if base_url_provided:
+		base_url_raw = selection.get('base_url')
+	else:
+		base_url_raw = os.getenv(base_url_env, '') if base_url_env else ''
+
+	base_url = _normalize_base_url(provider, base_url_raw, explicit=base_url_provided)
+
+	# Avoid picking up leftover base_urls from other providers
+	if not base_url and not base_url_provided:
 		base_url = meta.get('default_base_url') or ''
+
 	if base_url:
 		os.environ['OPENAI_BASE_URL'] = base_url
+	else:
+		os.environ.pop('OPENAI_BASE_URL', None)
 
 	# DEFAULT_LLM expects a provider prefix; convert model id to underscore form
 	safe_model = model.replace('-', '_')
