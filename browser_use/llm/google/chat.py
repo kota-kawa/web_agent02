@@ -98,18 +98,16 @@ class ChatGoogle(BaseChatModel):
 
         return gemini_messages
 
-    async def _send_request(self, gemini_messages: list[dict[str, Any]]) -> httpx.Response:
+    async def _send_request(
+        self, gemini_messages: list[dict[str, Any]], generation_config: dict[str, Any]
+    ) -> httpx.Response:
         url = f'{self.base_url}/models/{self.model}:generateContent'
         headers = {
             'Content-Type': 'application/json',
         }
         json_payload = {
             'contents': gemini_messages,
-            'generationConfig': {
-                'temperature': self.temperature,
-                'topP': self.top_p,
-                'maxOutputTokens': self.max_output_tokens,
-            },
+            'generationConfig': generation_config,
         }
 
         params = {'key': self.api_key}
@@ -142,7 +140,16 @@ class ChatGoogle(BaseChatModel):
         self, messages: list[BaseMessage], output_format: type[T] | None = None
     ) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
         gemini_messages = self._prepare_messages(messages)
-        response = await self._send_request(gemini_messages)
+
+        generation_config = {
+            'temperature': self.temperature,
+            'topP': self.top_p,
+            'maxOutputTokens': self.max_output_tokens,
+        }
+        if output_format:
+            generation_config['response_mime_type'] = 'application/json'
+
+        response = await self._send_request(gemini_messages, generation_config)
 
         response_data = response.json()
 

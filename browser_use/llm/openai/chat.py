@@ -7,8 +7,8 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 from openai.types.chat import ChatCompletionContentPartTextParam
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.shared.chat_model import ChatModel
+from openai.types.chat.completion_create_params import ResponseFormat
 from openai.types.shared_params.reasoning_effort import ReasoningEffort
-from openai.types.shared_params.response_format_json_schema import JSONSchema, ResponseFormatJSONSchema
 from pydantic import BaseModel
 
 from browser_use.llm.base import BaseChatModel
@@ -191,60 +191,38 @@ class ChatOpenAI(BaseChatModel):
 				del model_params['temperature']
 				del model_params['frequency_penalty']
 
-			if output_format is None:
-				# Return string response
-				response = await self.get_client().chat.completions.create(
-					model=self.model,
-					messages=openai_messages,
-					**model_params,
-				)
+			if output_format:
+				model_params['response_format'] = ResponseFormat(type='json_object')
+			# Return string response
+			response = await self.get_client().chat.completions.create(
+				model=self.model,
+				messages=openai_messages,
+				**model_params,
+			)
 
-				usage = self._get_usage(response)
-				return ChatInvokeCompletion(
-					completion=response.choices[0].message.content or '',
-					usage=usage,
-				)
+			usage = self._get_usage(response)
+			response_text = response.choices[0].message.content or ''
 
-			else:
-				response_format: JSONSchema = {
-					'name': 'agent_output',
-					'strict': True,
-					'schema': SchemaOptimizer.create_optimized_json_schema(output_format),
-				}
-
+			if output_format:
 				# Add JSON schema to system prompt if requested
 				if self.add_schema_to_system_prompt and openai_messages and openai_messages[0]['role'] == 'system':
-					schema_text = f'\n<json_schema>\n{response_format}\n</json_schema>'
+					schema = SchemaOptimizer.create_optimized_json_schema(output_format)
+					schema_text = f'\n<json_schema>\n{schema}\n</json_schema>'
 					if isinstance(openai_messages[0]['content'], str):
 						openai_messages[0]['content'] += schema_text
 					elif isinstance(openai_messages[0]['content'], Iterable):
 						openai_messages[0]['content'] = list(openai_messages[0]['content']) + [
 							ChatCompletionContentPartTextParam(text=schema_text, type='text')
 						]
-
-				# Return structured response
-				response = await self.get_client().chat.completions.create(
-					model=self.model,
-					messages=openai_messages,
-					response_format=ResponseFormatJSONSchema(json_schema=response_format, type='json_schema'),
-					**model_params,
-				)
-
-				if response.choices[0].message.content is None:
-					raise ModelProviderError(
-						message='Failed to parse structured output from model response',
-						status_code=500,
-						model=self.name,
-					)
-
-				usage = self._get_usage(response)
-
-				parsed = output_format.model_validate_json(response.choices[0].message.content)
-
+				parsed = output_format.model_validate_json(response_text)
 				return ChatInvokeCompletion(
 					completion=parsed,
 					usage=usage,
 				)
+			return ChatInvokeCompletion(
+				completion=response_text,
+				usage=usage,
+			)
 
 		except RateLimitError as e:
 			error_message = e.response.json().get('error', {})
