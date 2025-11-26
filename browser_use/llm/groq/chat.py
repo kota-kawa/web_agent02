@@ -1,4 +1,5 @@
 import logging
+import json
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar, overload
 
@@ -175,35 +176,48 @@ class ChatGroq(BaseChatModel):
 
 	async def _invoke_structured_output(self, groq_messages, output_format: type[T]) -> ChatInvokeCompletion[T]:
 		"""Handle structured output using either tool calling or JSON schema."""
-		if self.model in ToolCallingModels:
-			schema = SchemaOptimizer.create_optimized_json_schema(output_format)
-			response = await self._invoke_with_tool_calling(groq_messages, output_format, schema)
-		else:
-			response = await self.get_client().chat.completions.create(
-				model=self.model,
-				messages=groq_messages,
-				temperature=self.temperature,
-				top_p=self.top_p,
-				seed=self.seed,
-				response_format=ResponseFormat(type='json_object'),
-				service_tier=self.service_tier,
+		try:
+			if self.model in ToolCallingModels:
+				schema = SchemaOptimizer.create_optimized_json_schema(output_format)
+				response = await self._invoke_with_tool_calling(groq_messages, output_format, schema)
+				response_text = response.choices[0].message.tool_calls[0].function.arguments
+			else:
+				response = await self.get_client().chat.completions.create(
+					model=self.model,
+					messages=groq_messages,
+					temperature=self.temperature,
+					top_p=self.top_p,
+					seed=self.seed,
+					response_format={'type': 'json_object'},
+					service_tier=self.service_tier,
+				)
+				response_text = response.choices[0].message.content or ''
+
+			if not response_text:
+				raise ModelProviderError(
+					message='No content in response',
+					status_code=500,
+					model=self.name,
+				)
+
+			parsed_response = output_format.model_validate_json(response_text)
+			usage = self._get_usage(response)
+
+			return ChatInvokeCompletion(
+				completion=parsed_response,
+				usage=usage,
 			)
-
-		response_text = response.choices[0].message.content or ''
-		if not response_text:
-			raise ModelProviderError(
-				message='No content in response',
-				status_code=500,
-				model=self.name,
-			)
-
-		parsed_response = output_format.model_validate_json(response_text)
-		usage = self._get_usage(response)
-
-		return ChatInvokeCompletion(
-			completion=parsed_response,
-			usage=usage,
-		)
+		except (APIStatusError, json.JSONDecodeError, ModelProviderError) as e:
+			try:
+				logger.debug(f'Groq failed generation: {e}; fallback to manual parsing')
+				parsed_response = try_parse_groq_failed_generation(e, output_format)
+				logger.debug('Manual error parsing successful ✅')
+				return ChatInvokeCompletion(
+					completion=parsed_response,
+					usage=None,
+				)
+			except Exception as e:
+				raise ModelProviderError(message=str(e), model=self.name) from e
 
 	async def _invoke_with_tool_calling(self, groq_messages, output_format: type[T], schema) -> ChatCompletion:
 		"""Handle structured output using tool calling."""

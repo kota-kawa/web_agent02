@@ -162,23 +162,15 @@ class ChatGoogle(BaseChatModel):
             try:
                 parsed_content = self._parse_json_output(content_text, output_format)
                 return ChatInvokeCompletion(
-                    result=parsed_content,
-                    raw_completion=content_text,
-                    cost=None,
-                    token_usage=None,
-                    provider_name=self.provider,
-                    model_name=self.name,
+                    completion=parsed_content,
+                    usage=None
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 raise ModelProviderError(f"Failed to parse model output as JSON: {e}", model=self.name) from e
         else:
             return ChatInvokeCompletion(
-                result=content_text,
-                raw_completion=content_text,
-                cost=None,
-                token_usage=None,
-                provider_name=self.provider,
-                model_name=self.name,
+                completion=content_text,
+                usage=None
             )
 
     async def aclose(self) -> None:
@@ -188,10 +180,9 @@ class ChatGoogle(BaseChatModel):
 
     def _parse_json_output(self, text: str, output_format: type[T]) -> T:
         try:
-            json_start = text.index('{')
-            json_end = text.rindex('}') + 1
-            json_str = text[json_start:json_end]
-            data = json.loads(json_str)
-            return output_format(**data)
+            # Gemini often returns JSON wrapped in ```json ... ```
+            if text.startswith('```json'):
+                text = text[7:-3].strip()
+            return output_format.model_validate_json(text)
         except (ValueError, json.JSONDecodeError) as e:
             raise ValueError(f"Failed to decode JSON from model output: {text}") from e

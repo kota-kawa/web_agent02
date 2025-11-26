@@ -216,17 +216,10 @@ class ChatAnthropic(BaseChatModel):
 				for content_block in response.content:
 					if hasattr(content_block, 'type') and content_block.type == 'tool_use':
 						# Parse the tool input as the structured output
-						try:
-							return ChatInvokeCompletion(completion=output_format.model_validate(content_block.input), usage=usage)
-						except Exception as e:
-							# If validation fails, try to parse it as JSON first
-							if isinstance(content_block.input, str):
-								data = json.loads(content_block.input)
-								return ChatInvokeCompletion(
-									completion=output_format.model_validate(data),
-									usage=usage,
-								)
-							raise e
+						return ChatInvokeCompletion(
+							completion=output_format.model_validate(content_block.input),
+							usage=usage
+						)
 
 				# If no tool use block found, raise an error
 				raise ValueError('Expected tool use in response but none found')
