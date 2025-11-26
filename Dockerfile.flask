@@ -25,4 +25,5 @@ ENV FLASK_APP=app.py \
     FLASK_RUN_HOST=0.0.0.0 \
     FLASK_RUN_PORT=5005
 
+# Force rebuild to apply latest fixes
 CMD ["flask", "run"]
