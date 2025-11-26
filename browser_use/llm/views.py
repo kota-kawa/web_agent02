@@ -43,3 +43,8 @@ class ChatInvokeCompletion(BaseModel, Generic[T]):
 
 	usage: ChatInvokeUsage | None
 	"""The usage of the response."""
+
+	@property
+	def result(self) -> T:
+		"""DEPRECATED: an alias for completion to ensure backward compatibility."""
+		return self.completion

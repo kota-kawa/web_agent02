@@ -36,6 +36,26 @@ class ConversationAnalysis(BaseModel):
 	reason: str = Field(..., description='The reasoning behind the analysis and decision.')
 
 
+def _extract_json_from_text(text: str) -> dict | None:
+	"""Extracts JSON from text, tolerating markdown code blocks."""
+	# Look for a JSON block ```json ... ```
+	json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', text)
+	if json_match:
+		try:
+			return json.loads(json_match.group(1))
+		except json.JSONDecodeError:
+			pass  # Fallback to the next method
+
+	# Look for any JSON-like structure
+	json_match = re.search(r'\{[\s\S]*\}', text)
+	if json_match:
+		try:
+			return json.loads(json_match.group())
+		except json.JSONDecodeError:
+			return None
+	return None
+
+
 async def _analyze_conversation_history_async(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
 	"""
 	Analyze conversation history using LLM to determine if browser operations are needed
@@ -86,7 +106,9 @@ JSONのみで出力:
 
 	try:
 		# Use LLM to generate structured analysis
-		from browser_use.llm.messages import UserMessage, SystemMessage
+		from browser_use.llm.exceptions import ModelProviderError
+		from browser_use.llm.messages import SystemMessage, UserMessage
+		from pydantic import ValidationError
 
 		messages = [
 			SystemMessage(content='You are an expert in analyzing conversations.'),
@@ -103,28 +125,30 @@ JSONのみで出力:
 		# Convert the Pydantic model to a dictionary for the return value
 		return analysis_result.model_dump()
 
-	except (json.JSONDecodeError, TypeError) as exc:
-		logger.warning('Failed to parse LLM response as JSON: %s', exc)
-		return {
-			'should_reply': False,
-			'reply': '',
-			'addressed_agents': [],
-			'needs_action': False,
-			'action_type': None,
-			'task_description': None,
-			'reason': f'LLMの応答をJSON形式で解析できませんでした: {exc}',
-		}
-	except (ValueError, TypeError, AttributeError) as exc:
-		logger.warning('Error during conversation history analysis: %s', exc)
-		return {
-			'should_reply': False,
-			'reply': '',
-			'addressed_agents': [],
-			'needs_action': False,
-			'action_type': None,
-			'task_description': None,
-			'reason': f'会話履歴の分析中にエラーが発生しました: {exc}',
-		}
+	except (ModelProviderError, ValidationError, TypeError, AttributeError) as exc:
+		logger.warning('Structured output failed, falling back to text parsing: %s', exc)
+		try:
+			# Fallback to a regular text-based invocation
+			response = await llm.ainvoke(messages)
+			response_text = response.completion
+			if isinstance(response_text, str):
+				extracted_json = _extract_json_from_text(response_text)
+				if extracted_json:
+					analysis_result = ConversationAnalysis.model_validate(extracted_json)
+					return analysis_result.model_dump()
+			raise ValueError('Fallback parsing failed to produce a valid model.')
+
+		except (ModelProviderError, ValidationError, ValueError) as fallback_exc:
+			logger.warning('Error during conversation history analysis fallback: %s', fallback_exc)
+			return {
+				'should_reply': False,
+				'reply': '',
+				'addressed_agents': [],
+				'needs_action': False,
+				'action_type': None,
+				'task_description': None,
+				'reason': f'会話履歴の分析中にエラーが発生しました: {fallback_exc}',
+			}
 	except Exception as exc:
 		logger.exception('Unexpected error during conversation history analysis')
 		return {
