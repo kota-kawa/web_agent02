@@ -3,11 +3,37 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from .config import logger
 from .exceptions import AgentControllerError
 from .llm_setup import _create_selected_llm
+
+
+class ConversationAnalysis(BaseModel):
+	"""Data model for the result of conversation analysis."""
+
+	should_reply: bool = Field(
+		..., description='True if the browser agent should provide a brief, helpful reply.'
+	)
+	reply: str = Field(
+		...,
+		description='A short suggestion, alert, or mention of other agents. Should be empty if should_reply is False.',
+	)
+	addressed_agents: list[str] = Field(
+		default_factory=list,
+		description='A list of agent names that are addressed in the conversation (e.g., "Browser Agent").',
+	)
+	needs_action: bool = Field(..., description='True if the conversation requires a browser action.')
+	action_type: Literal['search', 'navigate', 'form_fill', 'data_extract'] | None = Field(
+		None, description='The type of browser action required.'
+	)
+	task_description: str | None = Field(
+		None, description='A specific and concrete task description for the browser agent.'
+	)
+	reason: str = Field(..., description='The reasoning behind the analysis and decision.')
 
 
 async def _analyze_conversation_history_async(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -66,44 +92,18 @@ JSONのみで出力:
 			SystemMessage(content='You are an expert in analyzing conversations.'),
 			UserMessage(role='user', content=analysis_prompt),
 		]
-		response = await llm.ainvoke(messages)
+		response = await llm.ainvoke(messages, output_format=ConversationAnalysis)
 
-		# Extract JSON from response
-		response_text = response.result if hasattr(response, 'result') else str(response)
+		# The response result should now be a Pydantic model instance
+		analysis_result = response.result
 
-		# Try to parse JSON from the response
-		# Sometimes LLM wraps JSON in markdown code blocks
-		# Note: These regex patterns work for simple JSON objects but may not handle
-		# deeply nested structures. The LLM is prompted to output simple JSON.
-		json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-		if json_match:
-			json_text = json_match.group(1)
-		else:
-			# Try to find raw JSON
-			json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-			if json_match:
-				json_text = json_match.group(0)
-			else:
-				json_text = response_text
+		if not isinstance(analysis_result, ConversationAnalysis):
+			raise TypeError(f'Expected ConversationAnalysis, but got {type(analysis_result).__name__}')
 
-		result = json.loads(json_text)
+		# Convert the Pydantic model to a dictionary for the return value
+		return analysis_result.model_dump()
 
-		# Validate the response structure
-		if not isinstance(result, dict):
-			raise ValueError('LLM response is not a dictionary')
-
-		# Ensure required fields exist with defaults
-		return {
-			'should_reply': bool(result.get('should_reply', False)),
-			'reply': result.get('reply') or '',
-			'addressed_agents': result.get('addressed_agents') or [],
-			'needs_action': bool(result.get('needs_action', False)),
-			'action_type': result.get('action_type'),
-			'task_description': result.get('task_description'),
-			'reason': result.get('reason', '理由が提供されていません'),
-		}
-
-	except json.JSONDecodeError as exc:
+	except (json.JSONDecodeError, TypeError) as exc:
 		logger.warning('Failed to parse LLM response as JSON: %s', exc)
 		return {
 			'should_reply': False,
@@ -138,7 +138,10 @@ JSONのみで出力:
 		}
 	finally:
 		if llm:
-			await llm.aclose()
+			try:
+				await llm.aclose()
+			except Exception:
+				logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
 
 
 def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:

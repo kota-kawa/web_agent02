@@ -13,12 +13,12 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str | None]] = {
 	'claude': {
 		'api_key_env': 'CLAUDE_API_KEY',
 		'base_url_env': 'CLAUDE_API_BASE',
-		'default_base_url': 'https://openrouter.ai/api/v1',
+		'default_base_url': None,
 	},
 	'gemini': {
 		'api_key_env': 'GEMINI_API_KEY',
 		'base_url_env': 'GEMINI_API_BASE',
-		'default_base_url': 'https://generativelanguage.googleapis.com/openai/v1',
+		'default_base_url': 'https://generativelanguage.googleapis.com/v1beta',
 	},
 	'groq': {
 		'api_key_env': 'GROQ_API_KEY',
