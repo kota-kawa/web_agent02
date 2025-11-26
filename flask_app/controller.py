@@ -770,9 +770,10 @@ class BrowserAgentController:
 				future.result(timeout=5)
 			except Exception:
 				self._logger.debug('Failed to shut down agent loop cleanly', exc_info=True)
+			finally:
+				if self._loop.is_running():
+					self._loop.call_soon_threadsafe(self._loop.stop)
 
-		if self._loop.is_running():
-			self._loop.call_soon_threadsafe(self._loop.stop)
 		if self._thread.is_alive():
 			self._thread.join(timeout=2)
 

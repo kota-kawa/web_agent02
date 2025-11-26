@@ -1744,7 +1744,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				action_errors=self.history.errors(),
 				action_history=action_history_data,
 				urls_visited=self.history.urls(),
-				steps=self._compute_steps_completed_in_current_run(),
+				steps=self.steps_completed_in_current_run,
 				total_input_tokens=token_summary.prompt_tokens,
 				total_duration_seconds=self.history.total_duration_seconds(),
 				success=self.history.is_successful(),
