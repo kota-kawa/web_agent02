@@ -192,7 +192,7 @@ class ChatOpenAI(BaseChatModel):
 				del model_params['frequency_penalty']
 
 			if output_format:
-				model_params['response_format'] = ResponseFormat(type='json_object')
+				model_params['response_format'] = {'type': 'json_object'}
 			# Return string response
 			response = await self.get_client().chat.completions.create(
 				model=self.model,
