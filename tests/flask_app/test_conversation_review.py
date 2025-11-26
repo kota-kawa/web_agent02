@@ -94,5 +94,72 @@ async def test_fallback_failure_returns_error_dict(mocker):
 
     # Assert
     assert result["needs_action"] is False
-    assert "会話履歴の分析中にエラーが発生しました" in result["reason"]
-    assert mock_llm_instance.ainvoke.call_count == 2
+    assert "会話履歴の分析用LLM呼び出しに失敗しました" in result["reason"]
+    assert mock_llm_instance.ainvoke.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_structured_output_with_legacy_result_field(mocker):
+    """
+    Ensure compatibility with LLM clients that return the payload via `.result`
+    instead of `.completion`.
+    """
+
+    class LegacyResponse:
+        def __init__(self, result):
+            self.result = result
+
+    analysis_model = ConversationAnalysis(
+        should_reply=True,
+        reply="Proceeding with browser action.",
+        addressed_agents=["Browser Agent"],
+        needs_action=True,
+        action_type="search",
+        task_description="Search for today's weather in Tokyo.",
+        reason="User requested current weather information.",
+    )
+
+    mock_llm_instance = AsyncMock()
+    mock_llm_instance.ainvoke.return_value = LegacyResponse(analysis_model)
+    mocker.patch(
+        "flask_app.conversation_review._create_selected_llm",
+        return_value=mock_llm_instance,
+    )
+
+    conversation_history = [{"role": "user", "content": "東京の天気を教えて"}]
+
+    result = await _analyze_conversation_history_async(conversation_history)
+
+    assert result["needs_action"] is True
+    assert result["task_description"] == "Search for today's weather in Tokyo."
+    assert result["reply"] == "Proceeding with browser action."
+    mock_llm_instance.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_missing_fields_are_normalized(mocker):
+    """Ensure missing optional fields are filled with safe defaults instead of raising."""
+
+    mock_llm_instance = AsyncMock()
+    mock_llm_instance.ainvoke.return_value = ChatInvokeCompletion(
+        completion={
+            "should_reply": False,
+            "needs_action": True,
+            "action_type": "search",
+            "task_description": "Find pricing info for the product.",
+        },
+        usage=None,
+    )
+    mocker.patch(
+        "flask_app.conversation_review._create_selected_llm",
+        return_value=mock_llm_instance,
+    )
+
+    conversation_history = [{"role": "user", "content": "商品価格を確認して"}]
+
+    result = await _analyze_conversation_history_async(conversation_history)
+
+    assert result["reply"] == ""
+    assert result["addressed_agents"] == []
+    assert result["reason"]  # normalized default reason string
+    assert result["action_type"] == "search"

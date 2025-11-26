@@ -1031,12 +1031,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		return self._current_step_number()
 
+	def _compute_steps_completed_in_current_run(self) -> int:
+		"""Internal helper to calculate completed steps for the current run."""
+
+		current_step = self._current_step_number()
+		return current_step - 1 if current_step > 0 else 0
+
 	@property
 	def steps_completed_in_current_run(self) -> int:
 		"""Number of steps completed during the most recent run."""
 
-		current_step = self._current_step_number()
-		return current_step - 1 if current_step > 0 else 0
+		return self._compute_steps_completed_in_current_run()
 
 	async def _raise_if_stopped_or_paused(self) -> None:
 		"""Utility function that raises an InterruptedError if the agent is stopped or paused."""
@@ -1739,7 +1744,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				action_errors=self.history.errors(),
 				action_history=action_history_data,
 				urls_visited=self.history.urls(),
-				steps=self.steps_completed_in_current_run(),
+				steps=self._compute_steps_completed_in_current_run(),
 				total_input_tokens=token_summary.prompt_tokens,
 				total_duration_seconds=self.history.total_duration_seconds(),
 				success=self.history.is_successful(),

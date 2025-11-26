@@ -459,6 +459,30 @@ class BrowserAgentController:
 		if session is not None:
 			with suppress(Exception):
 				await session.stop()
+		await self._close_llm()
+
+	async def _close_llm(self) -> None:
+		"""Close the shared LLM client to avoid late AsyncClient cleanup errors."""
+
+		llm = self._llm
+		if llm is None:
+			return
+
+		aclose = getattr(llm, 'aclose', None)
+		if not callable(aclose):
+			return
+
+		try:
+			await aclose()
+			self._llm = None
+		except RuntimeError as exc:
+			# httpx/anyio will raise if the event loop is already shutting down.
+			if 'Event loop is closed' in str(exc):
+				self._logger.debug('LLM client close skipped because event loop is closed.')
+			else:
+				self._logger.debug('Failed to close LLM client cleanly', exc_info=True)
+		except Exception:
+			self._logger.debug('Unexpected error while closing LLM client', exc_info=True)
 
 	def _call_in_loop(self, func: Callable[[], None]) -> None:
 		async def _invoke() -> None:
