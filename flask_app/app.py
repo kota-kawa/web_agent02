@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+import os
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 from flask.typing import ResponseReturnValue
+
+import requests
 
 from browser_use.model_selection import apply_model_selection, update_override
 
@@ -28,6 +31,8 @@ from .models import SUPPORTED_MODELS
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
+
+_PLATFORM_BASE = os.getenv('MULTI_AGENT_PLATFORM_BASE', 'http://web:5050').rstrip('/')
 
 
 @app.route('/favicon.ico')
@@ -121,6 +126,32 @@ def _get_existing_controller() -> BrowserAgentController:
 	return _AGENT_CONTROLLER
 
 
+def _find_model_label(provider: str, model: str) -> str:
+	"""Return the display label for a provider/model pair if known."""
+
+	for entry in SUPPORTED_MODELS:
+		if entry.get('provider') == provider and entry.get('model') == model:
+			return entry.get('label', '')
+	return ''
+
+
+def _notify_platform(selection: dict[str, Any]) -> None:
+	"""Best-effort push of the latest Browser model selection back to the platform."""
+
+	if not _PLATFORM_BASE or not selection or not isinstance(selection, dict):
+		return
+
+	try:
+		url = f'{_PLATFORM_BASE}/api/model_settings'
+		payload = {'selection': {'browser': selection}}
+		headers = {'X-Agent-Origin': 'browser'}
+		resp = requests.post(url, json=payload, headers=headers, timeout=2.0)
+		if not resp.ok:
+			logger.info('Platform model sync skipped (%s %s)', resp.status_code, resp.text)
+	except requests.exceptions.RequestException as exc:
+		logger.info('Platform model sync skipped (%s)', exc)
+
+
 @app.route('/')
 def index() -> str:
 	try:
@@ -180,19 +211,44 @@ def update_model_settings() -> ResponseReturnValue:
 
 	payload = request.get_json(silent=True) or {}
 	selection = payload if isinstance(payload, dict) else {}
+	applied: dict[str, Any] | None = None
 	try:
 		# Save selection to local_model_settings.json for persistence
 		local_path = Path('local_model_settings.json')
 		with open(local_path, 'w', encoding='utf-8') as f:
 			json.dump(selection, f, ensure_ascii=False, indent=2)
 
-		update_override(selection if selection else None)
+		applied = update_override(selection if selection else None)
 		if _AGENT_CONTROLLER is not None:
 			_AGENT_CONTROLLER.update_llm()
+
+		provider = applied.get('provider') if isinstance(applied, dict) else None
+		model = applied.get('model') if isinstance(applied, dict) else None
+		if provider and model:
+			_broadcaster.publish(
+				{
+					'type': 'model',
+					'payload': {
+						'provider': provider,
+						'model': model,
+						'label': _find_model_label(provider, model),
+						'base_url': applied.get('base_url', ''),
+					},
+				},
+			)
+
+		if request.headers.get('X-Platform-Propagation') != '1' and applied:
+			_notify_platform(
+				{
+					'provider': applied.get('provider', ''),
+					'model': applied.get('model', ''),
+					'base_url': applied.get('base_url', ''),
+				},
+			)
 	except Exception as exc:
 		logger.exception('Failed to apply model settings: %s', exc)
 		return jsonify({'error': 'モデル設定の更新に失敗しました。'}), 500
-	return jsonify({'status': 'ok', 'applied': selection or 'from_file'})
+	return jsonify({'status': 'ok', 'applied': applied if applied else selection or 'from_file'})
 
 
 @app.post('/api/chat')

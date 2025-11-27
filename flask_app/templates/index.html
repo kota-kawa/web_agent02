@@ -273,11 +273,18 @@
         }
       }
 
+      function encodeModelSelection(selection) {
+        if (!selection || !selection.provider || !selection.model) {
+          return null;
+        }
+        return JSON.stringify({ provider: selection.provider, model: selection.model });
+      }
+
       setStatus('', 'muted');
       setConnectionState('idle');
       updateEmptyState();
 
-      async function loadModels() {
+      async function loadModels(preferredSelection) {
         if (!modelSelector) {
           return;
         }
@@ -289,6 +296,7 @@
           const data = await response.json();
           const models = Array.isArray(data) ? data : Array.isArray(data.models) ? data.models : [];
           const current = !Array.isArray(data) && typeof data.current === 'object' ? data.current : null;
+          const preferred = encodeModelSelection(preferredSelection);
 
           modelSelector.innerHTML = '';
           models.forEach(model => {
@@ -298,9 +306,7 @@
             modelSelector.appendChild(option);
           });
 
-          const desired = current && current.provider && current.model
-            ? JSON.stringify({ provider: current.provider, model: current.model })
-            : null;
+          const desired = preferred || encodeModelSelection(current);
           const hasDesired = desired && Array.from(modelSelector.options).some(opt => opt.value === desired);
 
           if (hasDesired) {
@@ -539,6 +545,14 @@
               appendOrUpdateMessage(payload.payload);
             } else if (payload.type === 'reset') {
               handleResetEvent();
+            } else if (payload.type === 'model' && payload.payload) {
+              loadModels(payload.payload);
+              const updatedLabel = payload.payload.label || payload.payload.model;
+              if (updatedLabel) {
+                setStatus(`モデル設定が更新されました: ${updatedLabel}`, 'info');
+              } else {
+                setStatus('モデル設定が更新されました。', 'info');
+              }
             } else if (payload.type === 'status' && payload.payload) {
               const statusPayload = payload.payload || {};
               isRunning = false;
