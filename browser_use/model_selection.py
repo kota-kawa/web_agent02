@@ -13,12 +13,12 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str | None]] = {
 	'claude': {
 		'api_key_env': 'CLAUDE_API_KEY',
 		'base_url_env': 'CLAUDE_API_BASE',
-		'default_base_url': None,
+		'default_base_url': 'https://openrouter.ai/api/v1',
 	},
 	'gemini': {
 		'api_key_env': 'GEMINI_API_KEY',
 		'base_url_env': 'GEMINI_API_BASE',
-		'default_base_url': 'https://generativelanguage.googleapis.com/v1beta',
+		'default_base_url': 'https://generativelanguage.googleapis.com/openai/v1',
 	},
 	'groq': {
 		'api_key_env': 'GROQ_API_KEY',
@@ -123,10 +123,9 @@ def apply_model_selection(agent_key: str = 'browser', override: dict[str, str] |
 
 		os.environ['OPENAI_API_KEY'] = api_key
 
-	base_url_provided = 'base_url' in selection
-	if base_url_provided:
-		base_url_raw = selection.get('base_url')
-	else:
+	base_url_raw = selection.get('base_url')
+	base_url_provided = isinstance(base_url_raw, str) and base_url_raw.strip() != ''
+	if not base_url_provided:
 		base_url_raw = os.getenv(base_url_env, '') if base_url_env else ''
 
 	base_url = _normalize_base_url(provider, base_url_raw, explicit=base_url_provided)
