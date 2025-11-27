@@ -320,7 +320,7 @@ def chat() -> ResponseReturnValue:
 
 	# First prompt of a task: decide if browser actions are needed
 	if not controller.is_running() and not controller.has_handled_initial_prompt():
-		analysis = _analyze_conversation_history(_copy_history())
+		analysis = _analyze_conversation_history(_copy_history(), loop=controller.loop)
 		if not analysis.get('needs_action'):
 			reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
 			_append_history_message('assistant', reply)
@@ -453,7 +453,7 @@ def agent_relay() -> ResponseReturnValue:
 
 	# First prompt of a task: decide if browser actions are needed
 	if not controller.is_running() and not controller.has_handled_initial_prompt():
-		analysis = _analyze_conversation_history([{'role': 'user', 'content': prompt}])
+		analysis = _analyze_conversation_history([{'role': 'user', 'content': prompt}], loop=controller.loop)
 		if not analysis.get('needs_action'):
 			reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
 			controller.mark_initial_prompt_handled()
@@ -602,8 +602,11 @@ def check_conversation_history() -> ResponseReturnValue:
 	if not isinstance(conversation_history, list):
 		return jsonify({'error': '会話履歴はリスト形式である必要があります。'}), 400
 
+	# Try to use existing controller loop to avoid creating short-lived loops
+	loop = _AGENT_CONTROLLER.loop if _AGENT_CONTROLLER else None
+
 	# Analyze the conversation history
-	analysis = _analyze_conversation_history(conversation_history)
+	analysis = _analyze_conversation_history(conversation_history, loop=loop)
 
 	response_data = {
 		'analysis': analysis,

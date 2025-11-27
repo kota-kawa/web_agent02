@@ -80,6 +80,10 @@ class BrowserAgentController:
 		self._initial_prompt_handled = False
 		atexit.register(self.shutdown)
 
+	@property
+	def loop(self) -> asyncio.AbstractEventLoop:
+		return self._loop
+
 	def _run_loop(self) -> None:
 		asyncio.set_event_loop(self._loop)
 		self._loop.run_forever()

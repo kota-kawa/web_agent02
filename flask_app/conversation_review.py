@@ -221,7 +221,10 @@ JSONのみで出力:
 				logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
 
 
-def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
+def _analyze_conversation_history(
+	conversation_history: list[dict[str, Any]],
+	loop: asyncio.AbstractEventLoop | None = None,
+) -> dict[str, Any]:
 	"""
 	Synchronous wrapper for async conversation history analysis.
 
@@ -229,6 +232,15 @@ def _analyze_conversation_history(conversation_history: list[dict[str, Any]]) ->
 	from Flask's synchronous request context. Falls back to manual loop creation
 	if an event loop is already running (e.g., in tests).
 	"""
+	if loop and loop.is_running():
+		try:
+			future = asyncio.run_coroutine_threadsafe(
+				_analyze_conversation_history_async(conversation_history), loop
+			)
+			return future.result()
+		except RuntimeError:
+			logger.debug('Failed to run on provided loop, falling back to new loop.')
+
 	try:
 		return asyncio.run(_analyze_conversation_history_async(conversation_history))
 	except RuntimeError as exc:
