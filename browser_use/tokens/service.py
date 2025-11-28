@@ -332,7 +332,14 @@ class TokenCost:
 
 				logger.debug(f'Token cost service: {usage}')
 
-				asyncio.create_task(token_cost_service._log_usage(llm.model, usage))
+				async def _safe_log_usage():
+					try:
+						await token_cost_service._log_usage(llm.model, usage)
+					except Exception:
+						# Ignore errors during background usage logging (e.g. if loop is closed)
+						pass
+
+				asyncio.create_task(_safe_log_usage())
 
 			# else:
 			# 	await token_cost_service._log_non_usage_llm(llm)

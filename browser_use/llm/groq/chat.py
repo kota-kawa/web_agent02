@@ -244,5 +244,10 @@ class ChatGroq(BaseChatModel):
 
 	async def aclose(self) -> None:
 		"""Close the underlying HTTP client."""
-		if hasattr(self, '_async_client') and not self._async_client.is_closed:
-			await self._async_client.aclose()
+		if hasattr(self, "_async_client") and not self._async_client.is_closed:
+			try:
+				await self._async_client.aclose()
+			except RuntimeError as e:
+				# Ignore "Event loop is closed" error during cleanup
+				if "Event loop is closed" not in str(e):
+					raise

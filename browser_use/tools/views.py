@@ -1,6 +1,6 @@
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, AliasChoices
 
 
 # Action Input Models
@@ -24,7 +24,11 @@ class ClickElementAction(BaseModel):
 
 
 class InputTextAction(BaseModel):
-	index: int = Field(ge=0, description='index of the element to input text into, 0 is the page')
+	index: int = Field(
+		ge=0,
+		description='index of the element to input text into, 0 is the page',
+		validation_alias=AliasChoices('index', 'element_index'),
+	)
 	text: str
 	clear_existing: bool = Field(default=True, description='set True to clear existing text, False to append to existing text')
 
