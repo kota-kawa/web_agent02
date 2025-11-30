@@ -182,6 +182,54 @@ class TestRefactoring:
         assert completion.capital.lower() == self.EXPECTED_FRANCE_CAPITAL
 
     @pytest.mark.asyncio
+    @patch('browser_use.llm.google.chat.ChatGoogle._send_request', new_callable=AsyncMock)
+    async def test_google_structured_with_wrapped_json(self, mock_send_request):
+        """Gemini responses with preamble/code fences should still parse."""
+        wrapped_text = (
+            "thinking about the task first...\n"
+            "```json\n"
+            f'{{"country": "{self.EXPECTED_FRANCE_COUNTRY}", "capital": "{self.EXPECTED_FRANCE_CAPITAL}"}}\n'
+            "```\n"
+            "回答は上記です。"
+        )
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            'candidates': [{'content': {'parts': [{'text': wrapped_text}]}}]
+        }
+        mock_send_request.return_value = mock_response
+
+        chat = ChatGoogle(model='gemini-2.0-flash', api_key='test', temperature=0)
+        response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
+        completion = response.completion
+
+        assert isinstance(completion, CapitalResponse)
+        assert completion.country.lower() == self.EXPECTED_FRANCE_COUNTRY
+        assert completion.capital.lower() == self.EXPECTED_FRANCE_CAPITAL
+
+    @pytest.mark.asyncio
+    @patch('browser_use.llm.google.chat.ChatGoogle._send_request', new_callable=AsyncMock)
+    async def test_google_structured_with_inline_json(self, mock_send_request):
+        """Gemini responses with trailing text should still parse."""
+        inline_text = (
+            "Here are the details you asked for:\n"
+            f'{{"country": "{self.EXPECTED_FRANCE_COUNTRY}", "capital": "{self.EXPECTED_FRANCE_CAPITAL}"}}\n'
+            "Let me know if you need more."
+        )
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            'candidates': [{'content': {'parts': [{'text': inline_text}]}}]
+        }
+        mock_send_request.return_value = mock_response
+
+        chat = ChatGoogle(model='gemini-2.0-flash', api_key='test', temperature=0)
+        response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
+        completion = response.completion
+
+        assert isinstance(completion, CapitalResponse)
+        assert completion.country.lower() == self.EXPECTED_FRANCE_COUNTRY
+        assert completion.capital.lower() == self.EXPECTED_FRANCE_CAPITAL
+
+    @pytest.mark.asyncio
     @patch('browser_use.llm.groq.chat.ChatGroq.get_client')
     async def test_groq_ainvoke_normal(self, mock_get_client):
         """Test normal text response from Groq"""

@@ -32,7 +32,7 @@
 - `GET /` : noVNC iframe + チャット UI を表示。初回アクセス時に `BrowserAgentController.ensure_start_page_ready()` でブラウザをウォームアップ。
 - `GET /api/history` : 会話履歴 (`_copy_history()`).
 - `GET /api/stream` : Server-Sent Events。`MessageBroadcaster` で `message/update/status/reset` を push。
-- `POST /api/chat` : UI からの通常実行。`new_task` 指定で履歴を切り替え、完了後 `_summarize_history()` を返却。失敗時も履歴にメッセージを積み、SSE ステータスを更新。
+- `POST /api/chat` : UI からの通常実行。`new_task` 指定で履歴を切り替え、`skip_conversation_review` を true にすると会話分析をスキップして即時実行。完了後 `_summarize_history()` を返却し、失敗時も履歴にメッセージを積み、SSE ステータスを更新。
 - `POST /api/agent-relay` : 他エージェント用。エージェント稼働中なら `enqueue_follow_up()`、アイドル時は履歴非記録モードで即時実行。返り値に `steps`, `usage` などを含めます。
 - `POST /api/reset|pause|resume` : コントローラ状態操作。
 - `POST /api/conversations/review` (alias `/api/check-conversation-history`) : 会話履歴 `{"history":[{"role","content"}]}` を受信 → `_analyze_conversation_history()` → 「一言あった方が良い」場合は `should_reply`/`reply`/`addressed_agents` を返し、必要なら `controller.run()` を発火。`analysis`, `action_taken`, `run_summary`, `agent_history` を返す。409 で「実行中」通知。
@@ -77,3 +77,6 @@
 - API 変更は `docs/` と `examples/` の更新をセットで行い、`AGENTS.md` に運用手順を追記。
 - 長期ジョブや外部 API には `BROWSER_USE_LOGGING_LEVEL=debug` でトレースを採取し、`_broadcaster` を使った UI 通知を忘れない。
 - PR 前には `lint` → `pytest` → (必要なら) `uv run browseruse --help` で CLI が壊れていないか確認してください。
+
+## Critical Instruction / 重要指示
+どれだけ時間とコストをかけてもよいので、確実に目標が達成されるようにしてほしい。

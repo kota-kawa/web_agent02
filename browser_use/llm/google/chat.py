@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar, overload
 import httpx
+import re
 from pydantic import BaseModel
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.exceptions import ModelProviderError
@@ -184,10 +185,34 @@ class ChatGoogle(BaseChatModel):
                     raise
 
     def _parse_json_output(self, text: str, output_format: type[T]) -> T:
-        try:
-            # Gemini often returns JSON wrapped in ```json ... ```
-            if text.startswith('```json'):
-                text = text[7:-3].strip()
-            return output_format.model_validate_json(text)
-        except (ValueError, json.JSONDecodeError) as e:
-            raise ValueError(f"Failed to decode JSON from model output: {text}") from e
+        raw_text = text.strip()
+
+        def _extract_json_candidate(blob: str) -> str | None:
+            """Pull a JSON object out of a mixed Gemini response."""
+            # Prefer fenced code blocks if present
+            fence_match = re.search(r'```(?:json)?\\s*([\\s\\S]*?)```', blob)
+            if fence_match:
+                return fence_match.group(1).strip()
+
+            # Otherwise grab the first JSON-looking object
+            brace_match = re.search(r'\\{[\\s\\S]*\\}', blob)
+            if brace_match:
+                return brace_match.group(0).strip()
+
+            return None
+
+        candidates: list[str] = [raw_text]
+        extracted = _extract_json_candidate(raw_text)
+        if extracted and extracted not in candidates:
+            candidates.append(extracted)
+
+        for candidate in candidates:
+            try:
+                return output_format.model_validate_json(candidate)
+            except (ValueError, json.JSONDecodeError):
+                try:
+                    return output_format.model_validate(json.loads(candidate))
+                except Exception:
+                    continue
+
+        raise ValueError(f"Failed to decode JSON from model output: {text}")

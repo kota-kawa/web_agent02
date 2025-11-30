@@ -256,6 +256,8 @@ def chat() -> ResponseReturnValue:
 	payload = request.get_json(silent=True) or {}
 	prompt = (payload.get('prompt') or '').strip()
 	start_new_task = bool(payload.get('new_task'))
+	# Trusted callers can bypass the initial AI review when they already planned concrete steps.
+	skip_conversation_review = bool(payload.get('skip_conversation_review'))
 
 	if not prompt:
 		return jsonify({'error': 'プロンプトを入力してください。'}), 400
@@ -319,7 +321,7 @@ def chat() -> ResponseReturnValue:
 	_append_history_message('user', prompt)
 
 	# First prompt of a task: decide if browser actions are needed
-	if not controller.is_running() and not controller.has_handled_initial_prompt():
+	if not skip_conversation_review and not controller.is_running() and not controller.has_handled_initial_prompt():
 		analysis = _analyze_conversation_history(_copy_history(), loop=controller.loop)
 		if not analysis.get('needs_action'):
 			reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
