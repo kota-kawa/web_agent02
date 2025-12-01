@@ -30,6 +30,7 @@ def mock_api_keys():
     "provider, model, expected_client",
     [
         ("gemini", "gemini-2.5-flash", ChatGoogle),
+        ("gemini", "gemini-2.5-flash-lite", ChatGoogle),
         ("claude", "claude-sonnet-4-5", ChatAnthropic),
         ("groq", "llama-3.3-70b-versatile", ChatGroq),
         ("openai", "gpt-4.1", ChatOpenAI),
