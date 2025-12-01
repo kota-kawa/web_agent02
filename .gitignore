@@ -1,66 +1,125 @@
-# Cache files
+# --- General ---
 .DS_Store
+Thumbs.db
+desktop.ini
+*.bak
+*.swp
+*.swo
+*~
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+.env/
+.venv*/
+
+# --- Testing & Linting ---
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+junit/
+test-results/
+
+# --- Jupyter ---
 .ipynb_checkpoints
-~/
 
-# Virtual Environments
-.venv*
-venv/
-
-# IDEs
+# --- IDEs ---
 .vscode/
 .idea/
 
-# Build files
-dist/
-
-# Data files
-*.gif
-*.txt
-!flask_app/requirements.txt
-*.pdf
-*.csv
-*.json
-*.jsonl
+# --- Logs ---
 *.log
-*.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pip-log.txt
 
-# Secrets and sensitive files
-secrets.env
+# --- Project Specific : Secrets & Config ---
 .env
+.env.local
+.env.*.local
+# Keep example files
+!.env.example
+secrets.env
+# !secrets.env.example
+
+# Google Auth
+credentials.json
+token.json
+gcp-login.json
+
+# --- Project Specific : Browser & Agent Data ---
 browser_cookies.json
 cookies.json
-gcp-login.json
+temp-profile-*/
 saved_trajectories/
-old_tests/
 AgentHistory.json
 AgentHistoryList.json
+
+# --- Temporary Files ---
+tmp/
+temp/
+~/
+
+# --- Data Files ---
+# Aggressive exclusions based on project requirements
+*.gif
+*.pdf
+*.csv
+*.jsonl
+screenshot.png
+
+# JSON exclusions with exceptions
+*.json
+!package.json
+!tsconfig.json
+!docs/docs.json
+
+# Text file exclusions with exceptions
+*.txt
+!requirements.txt
+!flask_app/requirements.txt
+!LICENSE
+
+# --- Specific Local Files ---
+old_tests/
 private_example.py
 private_example
 CLAUDE.local.md
 
+# uv (Package Manager)
+# Lock file is currently ignored. Uncomment to track versions for reproducibility (recommended for apps).
 uv.lock
-temp
-tmp
 
-# Google API credentials
-credentials.json
-token.json
-
-!docs/docs.json
-
-
-temp-profile-*
-
-screenshot.png
-
-# *.md
-
+# Markdown files used for local tracking
 all_github_issues_progress.md
 all_github_issues.md
