@@ -17,7 +17,6 @@ T = TypeVar('T', bound=BaseModel)
 
 VerifiedGeminiModels = Literal[
     'gemini-2.5-flash',
-    'gemini-2.5-pro',
     'gemini-3-pro-preview',
 ]
 
@@ -190,12 +189,15 @@ class ChatGoogle(BaseChatModel):
         def _extract_json_candidate(blob: str) -> str | None:
             """Pull a JSON object out of a mixed Gemini response."""
             # Prefer fenced code blocks if present
-            fence_match = re.search(r'```(?:json)?\\s*([\\s\\S]*?)```', blob)
+            # Note: The original code used r'```(?:json)?\\s*([\\s\\S]*?)```' which failed in tests
+            # because of double backslash escaping in the string literal vs regex pattern.
+            # We use standard r'' string without double escaping for regex.
+            fence_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', blob)
             if fence_match:
                 return fence_match.group(1).strip()
 
             # Otherwise grab the first JSON-looking object
-            brace_match = re.search(r'\\{[\\s\\S]*\\}', blob)
+            brace_match = re.search(r'\{[\s\S]*\}', blob)
             if brace_match:
                 return brace_match.group(0).strip()
 

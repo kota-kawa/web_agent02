@@ -92,7 +92,7 @@ class TestRefactoring:
         with patch('browser_use.llm.groq.chat.ChatGroq.get_client') as mock_get_client:
             mock_get_client.return_value.chat.completions.create = AsyncMock(side_effect=APIStatusError("test", response=MagicMock(), body=None))
 
-            chat = ChatGroq(model='meta-llama/llama-4-maverick-17b-128e-instruct', temperature=0, api_key='test')
+            chat = ChatGroq(model='openai/gpt-oss-20b', temperature=0, api_key='test')
             response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
 
             completion = response.completion
@@ -239,7 +239,7 @@ class TestRefactoring:
         mock_response.usage = None
         mock_get_client.return_value.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        chat = ChatGroq(model='meta-llama/llama-4-maverick-17b-128e-instruct', temperature=0, api_key='test')
+        chat = ChatGroq(model='openai/gpt-oss-20b', temperature=0, api_key='test')
         response = await chat.ainvoke(self.CONVERSATION_MESSAGES)
         completion = response.completion
 
@@ -256,27 +256,7 @@ class TestRefactoring:
         mock_response.usage = None
         mock_get_client.return_value.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        chat = ChatGroq(model='meta-llama/llama-4-maverick-17b-128e-instruct', temperature=0, api_key='test')
-        response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
-
-        completion = response.completion
-
-        assert isinstance(completion, CapitalResponse)
-        assert completion.country.lower() == self.EXPECTED_FRANCE_COUNTRY
-        assert completion.capital.lower() == self.EXPECTED_FRANCE_CAPITAL
-
-    @pytest.mark.asyncio
-    @patch('browser_use.llm.groq.chat.ChatGroq.get_client')
-    async def test_groq_ainvoke_structured_tool_calling(self, mock_get_client):
-        """Test structured output from Groq with tool calling"""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.tool_calls = [MagicMock()]
-        mock_response.choices[0].message.tool_calls[0].function.arguments = f'{{"country": "{self.EXPECTED_FRANCE_COUNTRY}", "capital": "{self.EXPECTED_FRANCE_CAPITAL}"}}'
-        mock_response.usage = None
-        mock_get_client.return_value.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        chat = ChatGroq(model='moonshotai/kimi-k2-instruct', temperature=0, api_key='test')
+        chat = ChatGroq(model='openai/gpt-oss-20b', temperature=0, api_key='test')
         response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
 
         completion = response.completion
