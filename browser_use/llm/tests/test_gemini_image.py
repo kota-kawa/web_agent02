@@ -51,7 +51,7 @@ async def test_gemini_image_vision():
 	"""Test Gemini's ability to see and describe images."""
 
 	# Create the LLM
-	llm = ChatGoogle(model='gemini-2.0-flash-exp')
+	llm = ChatGoogle(model='gemini-2.5-flash-lite')
 
 	# Create a random image with text
 	image_data_url = create_random_text_image('Hello Gemini! Can you see this text?')

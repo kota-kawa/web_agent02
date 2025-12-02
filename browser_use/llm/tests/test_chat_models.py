@@ -122,7 +122,7 @@ class TestChatModels:
 		if not os.getenv('GOOGLE_API_KEY'):
 			pytest.skip('GOOGLE_API_KEY not set')
 
-		chat = ChatGoogle(model='gemini-2.0-flash', api_key=os.getenv('GOOGLE_API_KEY'), temperature=0)
+		chat = ChatGoogle(model='gemini-2.5-flash-lite', api_key=os.getenv('GOOGLE_API_KEY'), temperature=0)
 		response = await chat.ainvoke(self.CONVERSATION_MESSAGES)
 		completion = response.completion
 
@@ -136,7 +136,7 @@ class TestChatModels:
 		if not os.getenv('GOOGLE_API_KEY'):
 			pytest.skip('GOOGLE_API_KEY not set')
 
-		chat = ChatGoogle(model='gemini-2.0-flash', api_key=os.getenv('GOOGLE_API_KEY'), temperature=0)
+		chat = ChatGoogle(model='gemini-2.5-flash-lite', api_key=os.getenv('GOOGLE_API_KEY'), temperature=0)
 		response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
 		completion = response.completion
 
@@ -153,7 +153,7 @@ class TestChatModels:
 			pytest.skip('GOOGLE_CLOUD_PROJECT not set')
 
 		chat = ChatGoogle(
-			model='gemini-2.0-flash',
+			model='gemini-2.5-flash-lite',
 			vertexai=True,
 			project=os.getenv('GOOGLE_CLOUD_PROJECT'),
 			location='us-central1',
@@ -173,7 +173,7 @@ class TestChatModels:
 			pytest.skip('GOOGLE_CLOUD_PROJECT not set')
 
 		chat = ChatGoogle(
-			model='gemini-2.0-flash',
+			model='gemini-2.5-flash-lite',
 			vertexai=True,
 			project=os.getenv('GOOGLE_CLOUD_PROJECT'),
 			location='us-central1',
@@ -194,7 +194,7 @@ class TestChatModels:
 		if not os.getenv('GROQ_API_KEY'):
 			pytest.skip('GROQ_API_KEY not set')
 
-		chat = ChatGroq(model='meta-llama/llama-4-maverick-17b-128e-instruct', temperature=0)
+		chat = ChatGroq(model='llama-3.1-8b-instant', temperature=0)
 		response = await chat.ainvoke(self.CONVERSATION_MESSAGES)
 		completion = response.completion
 
@@ -208,7 +208,7 @@ class TestChatModels:
 		if not os.getenv('GROQ_API_KEY'):
 			pytest.skip('GROQ_API_KEY not set')
 
-		chat = ChatGroq(model='meta-llama/llama-4-maverick-17b-128e-instruct', temperature=0)
+		chat = ChatGroq(model='llama-3.1-8b-instant', temperature=0)
 		response = await chat.ainvoke(self.STRUCTURED_MESSAGES, output_format=CapitalResponse)
 
 		completion = response.completion

@@ -29,11 +29,11 @@ def mock_api_keys():
 @pytest.mark.parametrize(
     "provider, model, expected_client",
     [
-        ("gemini", "gemini-2.5-flash", ChatGoogle),
+        ("gemini", "gemini-3-pro-preview", ChatGoogle),
         ("gemini", "gemini-2.5-flash-lite", ChatGoogle),
-        ("claude", "claude-sonnet-4-5", ChatAnthropic),
+        ("claude", "claude-haiku-4-5", ChatAnthropic),
         ("groq", "llama-3.3-70b-versatile", ChatGroq),
-        ("openai", "gpt-4.1", ChatOpenAI),
+        ("openai", "gpt-5.1", ChatOpenAI),
     ],
 )
 def test_create_selected_llm_providers(provider, model, expected_client):
@@ -79,7 +79,7 @@ def test_gemini_with_openai_compatible_base_url():
     """
     selection = {
         "provider": "gemini",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-2.5-flash-lite",
         "base_url": "https://generativelanguage.googleapis.com/openai/v1"
     }
 
