@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_SELECTION = {'provider': 'openai', 'model': 'gpt-4.1'}
+DEFAULT_SELECTION = {'provider': 'openai', 'model': 'gpt-5.1'}
 
 PROVIDER_DEFAULTS: dict[str, dict[str, str | None]] = {
 	'openai': {'api_key_env': 'OPENAI_API_KEY', 'base_url_env': 'OPENAI_BASE_URL', 'default_base_url': None},

@@ -5,7 +5,7 @@ from browser_use.llm.groq.chat import ChatGroq
 from browser_use.llm.messages import SystemMessage, UserMessage
 
 llm = ChatGroq(
-	model='meta-llama/llama-4-maverick-17b-128e-instruct',
+	model='llama-3.1-8b-instant',
 	temperature=0.5,
 )
 # llm = ChatOpenAI(model='gpt-4.1-mini')

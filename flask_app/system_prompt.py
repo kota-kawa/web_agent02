@@ -10,14 +10,11 @@ from .config import logger
 
 # List of models that are not multimodal and should not receive vision inputs
 NON_MULTIMODAL_MODELS = [
-	'claude-sonnet-4-5',
 	'claude-haiku-4-5',
 	'claude-opus-4-5',
 	'llama-3.3-70b-versatile',
 	'llama-3.1-8b-instant',
 	'openai/gpt-oss-20b',
-	'meta-llama/llama-4-maverick-17b-128e-instruct',
-	'moonshotai/kimi-k2-instruct-0905',
 	'qwen/qwen3-32b',
 ]
 
