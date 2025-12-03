@@ -20,7 +20,7 @@ from browser_use.llm.base import BaseChatModel, ChatInvokeCompletion
 from browser_use.llm.exceptions import ModelProviderError, ModelRateLimitError
 from browser_use.llm.groq.parser import try_parse_groq_failed_generation
 from browser_use.llm.groq.serializer import GroqMessageSerializer
-from browser_use.llm.messages import BaseMessage
+from browser_use.llm.messages import BaseMessage, UserMessage, ContentPartTextParam
 from browser_use.llm.schema import SchemaOptimizer
 from browser_use.llm.views import ChatInvokeUsage
 
@@ -39,6 +39,19 @@ JsonSchemaModels = [
 ]
 
 ToolCallingModels = []
+
+# List of models that support vision (multimodal)
+# Llama 3.2 models usually support vision. Llama 3.1/3.3 usually do not (except specific variants).
+# Based on Groq docs, currently supported vision models should be listed here if they appear.
+# For now, we assume models NOT in this list are text-only.
+# We will check if the model name contains "llama-3.2" or "vision" or "llava" as a heuristic,
+# or explicit IDs.
+VISION_CAPABLE_MODELS = [
+    'llama-3.2-11b-vision-preview',
+    'llama-3.2-90b-vision-preview',
+    'llama-3.2-11b-text-preview', # Wait, this might be text only? naming suggests it.
+    # Add others as confirmed.
+]
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -91,6 +104,46 @@ class ChatGroq(BaseChatModel):
 	def name(self) -> str:
 		return str(self.model)
 
+	def _is_vision_model(self) -> bool:
+		"""Check if the current model supports vision."""
+		# Heuristic: Check against known vision models or naming conventions
+		model_name = str(self.model).lower()
+		if 'vision' in model_name:
+			return True
+		if 'llava' in model_name:
+			return True
+		# Add specific exact matches if needed
+		if model_name in [m.lower() for m in VISION_CAPABLE_MODELS]:
+			return True
+		return False
+
+	def _filter_messages(self, messages: list[BaseMessage]) -> list[BaseMessage]:
+		"""Filter out image content for non-vision models."""
+		if self._is_vision_model():
+			return messages
+
+		filtered_messages = []
+		for msg in messages:
+			if isinstance(msg, UserMessage) and isinstance(msg.content, list):
+				# Filter content parts
+				new_content = []
+				for part in msg.content:
+					if part.type == 'text':
+						new_content.append(part)
+					elif part.type == 'image_url':
+						logger.warning(f"Removing image from message for non-vision model {self.model}")
+						# Optionally add a placeholder text?
+						# new_content.append(ContentPartTextParam(type='text', text="[Image Removed]"))
+
+				# Create a new message with filtered content
+				# We use model_copy to preserve other attributes like name, but replace content
+				new_msg = msg.model_copy(update={'content': new_content})
+				filtered_messages.append(new_msg)
+			else:
+				filtered_messages.append(msg)
+
+		return filtered_messages
+
 	def _get_usage(self, response: ChatCompletion) -> ChatInvokeUsage | None:
 		usage = (
 			ChatInvokeUsage(
@@ -115,6 +168,10 @@ class ChatGroq(BaseChatModel):
 	async def ainvoke(
 		self, messages: list[BaseMessage], output_format: type[T] | None = None
 	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
+
+		# Filter messages based on model capabilities
+		messages = self._filter_messages(messages)
+
 		groq_messages = GroqMessageSerializer.serialize_messages(messages)
 
 		try:
