@@ -57,13 +57,20 @@ class ChatGoogle(BaseChatModel):
 	def name(self) -> str:
 		return str(self.model)
 
-	def _prepare_messages(self, messages: list[BaseMessage]) -> list[dict[str, Any]]:
+	def _prepare_messages(self, messages: list[BaseMessage]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
 		gemini_messages = []
 		system_instruction = None
+
 		for msg in messages:
 			if isinstance(msg, SystemMessage):
 				# Gemini API handles system instructions separately
-				system_instruction = {'role': 'user', 'parts': [{'text': msg.content}]}
+				# Usually there is only one system message, but if multiple, we concatenate?
+				# The snippet shows {"systemInstruction": {"parts": [...]}}
+				if system_instruction is None:
+					system_instruction = {'role': 'system', 'parts': [{'text': msg.content}]}
+				else:
+					# Append to existing parts
+					system_instruction['parts'].append({'text': msg.content})
 				continue
 
 			if isinstance(msg, UserMessage):
@@ -94,13 +101,24 @@ class ChatGoogle(BaseChatModel):
 
 			gemini_messages.append({'role': role, 'parts': content})
 
-		if system_instruction:
-			# Prepend system instruction to the conversation history as the first user message
-			gemini_messages.insert(0, system_instruction)
+		# If we have a system_instruction, it should be returned separately
+		# Note: The API expects system_instruction to be a dict like {role: "system", parts: [...]} not inside contents
+		# Wait, the official REST API doc says: "systemInstruction": { "parts": [...] } (role is optional or ignored? Snippet said "role": "string" in request body param list but "system" is not a standard role in contents).
+		# Let's trust the snippet: "systemInstruction": { "role": string, "parts": [...] }
 
-		return gemini_messages
+		# If system_instruction role is needed, 'system' seems appropriate or 'user' if forcing it?
+		# Docs usually imply it's separate. We'll leave 'role': 'system' inside the object if we constructed it that way,
+		# but strictly speaking it might just need 'parts'.
+		# However, `systemInstruction` is a top-level field.
 
-	async def _send_request(self, gemini_messages: list[dict[str, Any]], generation_config: dict[str, Any]) -> httpx.Response:
+		return gemini_messages, system_instruction
+
+	async def _send_request(
+		self,
+		gemini_messages: list[dict[str, Any]],
+		generation_config: dict[str, Any],
+		system_instruction: dict[str, Any] | None = None
+	) -> httpx.Response:
 		url = f'{self.base_url}/models/{self.model}:generateContent'
 		headers = {
 			'Content-Type': 'application/json',
@@ -109,6 +127,12 @@ class ChatGoogle(BaseChatModel):
 			'contents': gemini_messages,
 			'generationConfig': generation_config,
 		}
+
+		if system_instruction:
+			# Ensure role is not user/model if strictly systemInstruction?
+			# Actually, the snippet showed: "systemInstruction": { "role": string, ... }
+			# We'll include it as is.
+			json_payload['systemInstruction'] = system_instruction
 
 		params = {'key': self.api_key}
 
@@ -137,7 +161,7 @@ class ChatGoogle(BaseChatModel):
 	async def ainvoke(
 		self, messages: list[BaseMessage], output_format: type[T] | None = None
 	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
-		gemini_messages = self._prepare_messages(messages)
+		gemini_messages, system_instruction = self._prepare_messages(messages)
 
 		generation_config = {
 			'temperature': self.temperature,
@@ -147,13 +171,18 @@ class ChatGoogle(BaseChatModel):
 		if output_format:
 			generation_config['response_mime_type'] = 'application/json'
 
-		response = await self._send_request(gemini_messages, generation_config)
+		response = await self._send_request(gemini_messages, generation_config, system_instruction)
 
 		response_data = response.json()
 
 		try:
 			content_text = response_data['candidates'][0]['content']['parts'][0]['text']
 		except (KeyError, IndexError):
+			# Better error handling for blocked content
+			if response_data.get('promptFeedback', {}).get('blockReason'):
+				block_reason = response_data['promptFeedback']['blockReason']
+				raise ModelProviderError(f'Response blocked: {block_reason}', model=self.name)
+
 			raise ModelProviderError('Invalid response structure from Gemini API', model=self.name)
 
 		if output_format:
