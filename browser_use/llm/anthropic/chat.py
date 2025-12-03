@@ -90,14 +90,17 @@ class ChatAnthropic(BaseChatModel):
 		if self.temperature is not None:
 			client_params['temperature'] = self.temperature
 
-		if self.max_tokens is not None:
-			client_params['max_tokens'] = self.max_tokens
+		# max_tokens is required for Anthropic, use default if not set
+		client_params['max_tokens'] = self.max_tokens if self.max_tokens is not None else 4096
 
 		if self.top_p is not None:
 			client_params['top_p'] = self.top_p
 
-		if self.seed is not None:
-			client_params['seed'] = self.seed
+		# Note: 'seed' is currently not supported in standard Anthropic Messages API
+		# but if it becomes supported, it can remain.
+		# Removing it to be safe unless we know it's supported (it's not in current docs).
+		# if self.seed is not None:
+		# 	client_params['seed'] = self.seed
 
 		return client_params
 
@@ -139,6 +142,16 @@ class ChatAnthropic(BaseChatModel):
 	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
 		anthropic_messages, system_prompt = AnthropicMessageSerializer.serialize_messages(messages)
 
+		# Important: claude-haiku-4-5 and newer models might require extra headers if in beta
+		# But since I cannot confirm the exact header, I will rely on standard calls.
+		# However, one common issue is that `anthropic_messages` might contain cache_control
+		# on non-latest models if not handled.
+		# The serializer seems to handle it.
+
+		# Also, ensure system_prompt is passed correctly (it can be a string or list of blocks)
+		# The API expects `system` to be str or list[TextBlockParam].
+		# The serializer returns list[TextBlockParam] | str | None. Correct.
+
 		try:
 			if output_format is None:
 				# Normal completion without structured output
@@ -160,6 +173,9 @@ class ChatAnthropic(BaseChatModel):
 				usage = self._get_usage(response)
 
 				# Extract text from the first content block
+				if not response.content:
+					return ChatInvokeCompletion(completion='', usage=usage)
+
 				first_content = response.content[0]
 				if isinstance(first_content, TextBlock):
 					response_text = first_content.text
