@@ -17,6 +17,8 @@ NON_MULTIMODAL_MODELS = [
 	'openai/gpt-oss-20b',
 	'qwen/qwen3-32b',
 ]
+VISION_CAPABLE_PROVIDERS = {'claude', 'gemini', 'openai'}
+_NON_MULTIMODAL_MODELS_LOWER = {model.lower() for model in NON_MULTIMODAL_MODELS}
 
 _LANGUAGE_EXTENSION = (
 	'### 追加の言語ガイドライン\n'
@@ -29,6 +31,21 @@ _LANGUAGE_EXTENSION = (
 _SYSTEM_PROMPT_FILENAME = 'system_prompt_browser_agent.md'
 _CUSTOM_SYSTEM_PROMPT_TEMPLATE: str | None = None
 _DEFAULT_MAX_ACTIONS_PER_STEP = 10
+
+
+def _should_disable_vision(provider: str | None, model: str | None) -> bool:
+	"""Return True when the selected model/provider should not receive vision inputs."""
+
+	provider_normalized = (provider or '').strip().lower()
+	model_normalized = (model or '').strip().lower()
+
+	if provider_normalized == 'groq':
+		return True
+
+	if provider_normalized and provider_normalized not in VISION_CAPABLE_PROVIDERS:
+		return True
+
+	return model_normalized in _NON_MULTIMODAL_MODELS_LOWER
 
 
 def _system_prompt_candidate_paths() -> tuple[Path, ...]:
@@ -66,9 +83,10 @@ def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS
 		return None
 
 	selection = _load_selection('browser')
+	provider = selection.get('provider', '')
 	model = selection.get('model', '')
 
-	if model in NON_MULTIMODAL_MODELS:
+	if _should_disable_vision(provider, model):
 		# Remove vision-related sections for non-multimodal models
 		template = re.sub(r'<browser_vision>.*?</browser_vision>\n', '', template, flags=re.DOTALL)
 		# Adjust reasoning rules to remove dependency on screenshots
@@ -82,8 +100,8 @@ def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS
 		)
 
 	current_datetime_line = datetime.now().strftime('現在の日時ー%Y年%m月%d日%H時%M分')
-	try:
-		return template.format(max_actions=max_actions_per_step, current_datetime=current_datetime_line)
-	except Exception:
-		logger.exception('Failed to format custom system prompt template; using raw template contents.')
-		return template
+	# Avoid str.format() so literal braces in the template (e.g., action schemas) are preserved
+	# without triggering KeyError for names like "go_to_url".
+	template = template.replace('{max_actions}', str(max_actions_per_step))
+	template = template.replace('{current_datetime}', current_datetime_line)
+	return template

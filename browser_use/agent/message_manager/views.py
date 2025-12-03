@@ -19,6 +19,7 @@ class HistoryItem(BaseModel):
 	evaluation_previous_goal: str | None = None
 	memory: str | None = None
 	next_goal: str | None = None
+	current_status: str | None = None
 	action_results: str | None = None
 	error: str | None = None
 	system_message: str | None = None
@@ -54,6 +55,10 @@ class HistoryItem(BaseModel):
 			# Only include next_goal if it's not None/empty
 			if self.next_goal:
 				content_parts.append(f'{self.next_goal}')
+            
+			# Only include current_status if it's not None/empty
+			if self.current_status:
+				content_parts.append(f'現在の状況: {self.current_status}')
 
 			if self.action_results:
 				content_parts.append(self.action_results)

@@ -5,19 +5,19 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .config import logger
 from .exceptions import AgentControllerError
 from .llm_setup import _create_selected_llm
+from browser_use.llm.exceptions import ModelProviderError
+from browser_use.llm.messages import SystemMessage, UserMessage
 
 
 class ConversationAnalysis(BaseModel):
 	"""Data model for the result of conversation analysis."""
 
-	should_reply: bool = Field(
-		..., description='True if the browser agent should provide a brief, helpful reply.'
-	)
+	should_reply: bool = Field(..., description='True if the browser agent should provide a brief, helpful reply.')
 	reply: str = Field(
 		default='',
 		description='A short suggestion, alert, or mention of other agents. Should be empty if should_reply is False.',
@@ -30,9 +30,7 @@ class ConversationAnalysis(BaseModel):
 	action_type: Literal['search', 'navigate', 'form_fill', 'data_extract'] | None = Field(
 		None, description='The type of browser action required.'
 	)
-	task_description: str | None = Field(
-		None, description='A specific and concrete task description for the browser agent.'
-	)
+	task_description: str | None = Field(None, description='A specific and concrete task description for the browser agent.')
 	reason: str = Field('', description='The reasoning behind the analysis and decision.')
 
 
@@ -115,6 +113,77 @@ def _get_completion_payload(response: Any) -> Any:
 	raise AttributeError('LLM response did not include a completion/result payload')
 
 
+async def _fallback_to_text_parsing(llm: Any, messages: list[Any]) -> dict[str, Any]:
+	"""Fallback path when structured output is unavailable."""
+	try:
+		response = await llm.ainvoke(messages)
+		response_text = _get_completion_payload(response)
+		extracted_json = None
+		if isinstance(response_text, str):
+			extracted_json = _extract_json_from_text(response_text)
+		elif isinstance(response_text, dict):
+			extracted_json = response_text
+
+		if extracted_json:
+			normalized = _normalize_analysis_payload(extracted_json)
+			analysis_result = ConversationAnalysis.model_validate(normalized)
+			return analysis_result.model_dump()
+
+		raise ValueError('Fallback parsing failed to produce a valid model.')
+
+	except ModelProviderError as fallback_exc:
+		logger.warning('Provider error during conversation history analysis fallback: %s', fallback_exc)
+		return _build_error_response(f'会話履歴の分析用LLM呼び出しに失敗しました: {fallback_exc}')
+	except (ValidationError, ValueError) as fallback_exc:
+		logger.warning('Error during conversation history analysis fallback: %s', fallback_exc)
+		return _build_error_response(f'会話履歴の分析中にエラーが発生しました: {fallback_exc}')
+
+
+def _trim_conversation_history(
+	conversation_history: list[dict[str, Any]],
+	window_size: int = 5,
+) -> list[dict[str, Any]]:
+	"""Keep the first user input and the most recent messages up to ``window_size``.
+
+	The first user message anchors context, and the tail keeps the latest turns
+	for the LLM. Duplicates are removed using message ids when present.
+	"""
+	if not conversation_history or window_size <= 0:
+		return conversation_history
+
+	first_user_message = next((msg for msg in conversation_history if msg.get('role') == 'user'), None)
+	anchor = first_user_message or conversation_history[0]
+	tail = conversation_history[-window_size:]
+
+	def _normalize(value: Any) -> Any:
+		if isinstance(value, (str, int, float, type(None))):
+			return value
+		return repr(value)
+
+	def _key(msg: dict[str, Any]) -> tuple[str, Any, Any, Any]:
+		if isinstance(msg, dict) and 'id' in msg:
+			return ('id', msg.get('id'), None, None)
+		return (
+			'content',
+			_normalize(msg.get('role')),
+			_normalize(msg.get('content')),
+			_normalize(msg.get('timestamp')),
+		)
+
+	seen: set[tuple[str, Any, Any, Any]] = set()
+	selected: list[dict[str, Any]] = []
+	for msg in [anchor, *tail]:
+		if not isinstance(msg, dict):
+			continue
+		msg_key = _key(msg)
+		if msg_key in seen:
+			continue
+		seen.add(msg_key)
+		selected.append(msg)
+
+	return selected
+
+
 async def _analyze_conversation_history_async(conversation_history: list[dict[str, Any]]) -> dict[str, Any]:
 	"""
 	Analyze conversation history using LLM to determine if browser operations are needed
@@ -128,6 +197,7 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
 		return _build_error_response(f'LLMの初期化に失敗しました: {exc}')
 
 	# Format conversation history for analysis
+	conversation_history = _trim_conversation_history(conversation_history)
 	conversation_text = ''
 	for msg in conversation_history:
 		role = msg.get('role', 'unknown')
@@ -160,10 +230,6 @@ JSONのみで出力:
 
 	try:
 		# Use LLM to generate structured analysis
-		from browser_use.llm.exceptions import ModelProviderError
-		from browser_use.llm.messages import SystemMessage, UserMessage
-		from pydantic import ValidationError
-
 		messages = [
 			SystemMessage(content='You are an expert in analyzing conversations.'),
 			UserMessage(role='user', content=analysis_prompt),
@@ -183,33 +249,11 @@ JSONのみで出力:
 		raise TypeError(f'Expected ConversationAnalysis, but got {type(analysis_result).__name__}')
 
 	except ModelProviderError as exc:
-		logger.warning('Structured output failed due to provider error: %s', exc)
-		return _build_error_response(f'会話履歴の分析用LLM呼び出しに失敗しました: {exc}')
+		logger.warning('Structured output failed due to provider error, retrying without schema: %s', exc)
+		return await _fallback_to_text_parsing(llm, messages)
 	except (ValidationError, TypeError, AttributeError) as exc:
 		logger.warning('Structured output failed, falling back to text parsing: %s', exc)
-		try:
-			# Fallback to a regular text-based invocation
-			response = await llm.ainvoke(messages)
-			response_text = _get_completion_payload(response)
-			extracted_json = None
-			if isinstance(response_text, str):
-				extracted_json = _extract_json_from_text(response_text)
-			elif isinstance(response_text, dict):
-				extracted_json = response_text
-
-			if extracted_json:
-				normalized = _normalize_analysis_payload(extracted_json)
-				analysis_result = ConversationAnalysis.model_validate(normalized)
-				return analysis_result.model_dump()
-
-			raise ValueError('Fallback parsing failed to produce a valid model.')
-
-		except ModelProviderError as fallback_exc:
-			logger.warning('Provider error during conversation history analysis fallback: %s', fallback_exc)
-			return _build_error_response(f'会話履歴の分析用LLM呼び出しに失敗しました: {fallback_exc}')
-		except (ValidationError, ValueError) as fallback_exc:
-			logger.warning('Error during conversation history analysis fallback: %s', fallback_exc)
-			return _build_error_response(f'会話履歴の分析中にエラーが発生しました: {fallback_exc}')
+		return await _fallback_to_text_parsing(llm, messages)
 	except Exception as exc:
 		logger.exception('Unexpected error during conversation history analysis')
 		return _build_error_response(f'予期しないエラーが発生しました: {exc}')
@@ -234,9 +278,7 @@ def _analyze_conversation_history(
 	"""
 	if loop and loop.is_running():
 		try:
-			future = asyncio.run_coroutine_threadsafe(
-				_analyze_conversation_history_async(conversation_history), loop
-			)
+			future = asyncio.run_coroutine_threadsafe(_analyze_conversation_history_async(conversation_history), loop)
 			return future.result()
 		except RuntimeError:
 			logger.debug('Failed to run on provided loop, falling back to new loop.')

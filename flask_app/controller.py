@@ -19,21 +19,27 @@ from .exceptions import AgentControllerError
 from .formatting import _format_step_plan
 from .history import _append_history_message
 from .llm_setup import _create_selected_llm
-from .system_prompt import _DEFAULT_MAX_ACTIONS_PER_STEP, _LANGUAGE_EXTENSION, _build_custom_system_prompt
+from .system_prompt import (
+	_DEFAULT_MAX_ACTIONS_PER_STEP,
+	_LANGUAGE_EXTENSION,
+	_build_custom_system_prompt,
+	_should_disable_vision,
+)
 
 try:
-	from browser_use import Agent, BrowserProfile, BrowserSession
+	from browser_use import Agent, BrowserProfile, BrowserSession, Tools
 except ModuleNotFoundError:
 	import sys
 
 	ROOT_DIR = Path(__file__).resolve().parents[1]
 	if str(ROOT_DIR) not in sys.path:
 		sys.path.insert(0, str(ROOT_DIR))
-	from browser_use import Agent, BrowserProfile, BrowserSession
+	from browser_use import Agent, BrowserProfile, BrowserSession, Tools
 
 from browser_use.agent.views import AgentHistoryList, AgentOutput
 from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
+from browser_use.model_selection import _load_selection
 
 
 @dataclass
@@ -180,16 +186,34 @@ class BrowserAgentController:
 		register_callback = handle_new_step if record_history else None
 
 		def _create_new_agent(initial_task: str) -> Agent:
+			selection = _load_selection('browser')
+			provider = selection.get('provider', '')
+			model = str(selection.get('model', ''))
+			provider_from_llm = getattr(self._llm, 'provider', '') or provider
+			model_from_llm = str(getattr(self._llm, 'model', model) or model)
+
+			vision_disabled = _should_disable_vision(provider_from_llm, model_from_llm)
+			if vision_disabled:
+				self._logger.info(
+					'Disabling vision because provider/model are not in the supported list: provider=%s model=%s',
+					provider_from_llm,
+					model_from_llm,
+				)
+
 			custom_system_prompt = _build_custom_system_prompt()
 			extend_system_message = None if custom_system_prompt else _LANGUAGE_EXTENSION
+			tools = Tools(exclude_actions=['read_file'])
 			fresh_agent = Agent(
 				task=initial_task,
 				browser_session=session,
 				llm=self._llm,
+				tools=tools,
 				register_new_step_callback=register_callback,
 				max_actions_per_step=_DEFAULT_MAX_ACTIONS_PER_STEP,
 				override_system_message=custom_system_prompt,
 				extend_system_message=extend_system_message,
+				max_history_items=6,
+				use_vision=not vision_disabled,
 			)
 			start_url = self._get_resume_url() or _DEFAULT_START_URL
 			if start_url and not fresh_agent.initial_actions:

@@ -1,7 +1,10 @@
 # Implementation Summary: Conversation History Check Endpoint
 
 ## Overview
-This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary.
+This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary. Conversation context handed to the LLM is trimmed to the very first user input plus the most recent five messages so prompts stay compact while preserving intent.
+
+## Additional Behavior Adjustments
+- Browser agent tools now exclude the `read_file` action and the system prompt explicitly forbids it, preventing the LLM from generating or selecting `read_file` tasks (flask_app/controller.py, flask_app/system_prompt_browser_agent.md).
 
 ## Problem Statement (Japanese)
 他のエージェントから、会話履歴が送信されてくる時がある。そのために、受け入れるためのエンドポイントを新規で作成してほしい。そして、その会話履歴を確認して、何か問題が発生していて、ブラウザ操作をして解決できそうな場合には、既存のロジックを使って、解決のために操作を実行してほしい。特に何もしなくてよさそうならば、何もしないようにしてほしい。つまり、会話履歴のチェック用のエンドポイントと、それに対するLLMがjsonを出力して、その出力をチェックして処理をするコードを書いてほしい。
@@ -72,6 +75,13 @@ Comprehensive error handling for:
 - JSON parsing errors
 - Agent already running (returns 409)
 - Agent execution failures
+
+### 6. Context window control
+- LLM analysis always keeps the first user input and only the latest five conversation messages.
+- Older turns are omitted to shrink payloads without losing the original intent.
+
+### 7. Step output enrichment
+- UI step summaries now show `現在の状況:` alongside `アクション:` and `次の目標` when the model provides it, improving situational awareness.
 
 ## API Specification
 

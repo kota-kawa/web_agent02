@@ -105,8 +105,8 @@ def _format_step_entry(index: int, step: Any) -> str:
 			page_parts.append(_truncate(_compact_text(state.title), 80))
 		if getattr(state, 'url', None):
 			page_parts.append(state.url)
-		if page_parts:
-			lines.append('ページ: ' + ' / '.join(page_parts))
+		# if page_parts:
+		# 	lines.append('ページ: ' + ' / '.join(page_parts))
 
 	model_output = getattr(step, 'model_output', None)
 	if model_output:
@@ -117,6 +117,8 @@ def _format_step_entry(index: int, step: Any) -> str:
 			lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
 		if model_output.next_goal:
 			lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+		if model_output.current_status:
+			lines.append('現在の状況: ' + _truncate(_compact_text(model_output.current_status), 120))
 
 	result_lines = [text for text in (_format_result(r) for r in getattr(step, 'result', [])) if text]
 	if result_lines:
@@ -143,25 +145,16 @@ def _format_step_plan(
 	state: BrowserStateSummary,
 	model_output: AgentOutput,
 ) -> str:
-	lines: list[str] = [f'ステップ{step_number} 計画']
+	lines: list[str] = [f'ステップ{step_number}']
 
-	page_parts: list[str] = []
-	if state.title:
-		page_parts.append(_truncate(_compact_text(state.title), 80))
-	if state.url:
-		page_parts.append(state.url)
-	if page_parts:
-		lines.append('ページ: ' + ' / '.join(page_parts))
-
-	action_lines = [_format_action(action) for action in model_output.action]
-	if action_lines:
-		lines.append('アクション候補: ' + ' / '.join(action_lines))
 	if model_output.evaluation_previous_goal:
 		lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
 	if model_output.memory:
 		lines.append('メモリ: ' + _truncate(_compact_text(model_output.memory), 120))
 	if model_output.next_goal:
 		lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+	if model_output.current_status:
+		lines.append('現在の状況: ' + _truncate(_compact_text(model_output.current_status), 120))
 
 	return '\n'.join(lines)
 

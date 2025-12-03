@@ -7,7 +7,6 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 from openai.types.chat import ChatCompletionContentPartTextParam
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.shared.chat_model import ChatModel
-from openai.types.chat.completion_create_params import ResponseFormat
 from openai.types.shared_params.reasoning_effort import ReasoningEffort
 from pydantic import BaseModel
 
@@ -257,10 +256,10 @@ class ChatOpenAI(BaseChatModel):
 
 	async def aclose(self) -> None:
 		"""Close the underlying HTTP client."""
-		if hasattr(self, "_async_client") and not self._async_client.is_closed:
+		if hasattr(self, '_async_client') and not self._async_client.is_closed:
 			try:
 				await self._async_client.aclose()
 			except RuntimeError as e:
 				# Ignore "Event loop is closed" error during cleanup
-				if "Event loop is closed" not in str(e):
+				if 'Event loop is closed' not in str(e):
 					raise

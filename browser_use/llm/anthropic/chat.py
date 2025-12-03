@@ -1,4 +1,3 @@
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeVar, overload
@@ -216,10 +215,7 @@ class ChatAnthropic(BaseChatModel):
 				for content_block in response.content:
 					if hasattr(content_block, 'type') and content_block.type == 'tool_use':
 						# Parse the tool input as the structured output
-						return ChatInvokeCompletion(
-							completion=output_format.model_validate(content_block.input),
-							usage=usage
-						)
+						return ChatInvokeCompletion(completion=output_format.model_validate(content_block.input), usage=usage)
 
 				# If no tool use block found, raise an error
 				raise ValueError('Expected tool use in response but none found')
@@ -235,10 +231,10 @@ class ChatAnthropic(BaseChatModel):
 
 	async def aclose(self) -> None:
 		"""Close the underlying HTTP client."""
-		if hasattr(self, "_async_client") and not self._async_client.is_closed:
+		if hasattr(self, '_async_client') and not self._async_client.is_closed:
 			try:
 				await self._async_client.aclose()
 			except RuntimeError as e:
 				# Ignore "Event loop is closed" error during cleanup
-				if "Event loop is closed" not in str(e):
+				if 'Event loop is closed' not in str(e):
 					raise

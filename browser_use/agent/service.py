@@ -1234,6 +1234,26 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Add context message to help model fix parsing errors
 			parse_hint = 'Your response could not be parsed. Return a valid JSON object with the required fields.'
 			# self._message_manager._add_context_message(UserMessage(content=parse_hint))
+		elif 'messages[1].content' in error_msg and 'invalid' in error_msg.lower():
+			self.logger.warning(f'{prefix}{error_msg}')
+			self.logger.warning('⚠️ API rejected message content (likely image). Disabling vision for future steps to recover.')
+			self.settings.use_vision = False
+		elif 'validation errors for AgentOutput' in error_msg and 'input_value' in error_msg and "'error':" in error_msg:
+			self.logger.error(f'{prefix}{error_msg}')
+
+			# Try to extract the actual error message from the input_value
+			# Pattern: input_value={'error': {'message': 'ACTUAL_ERROR_MESSAGE', ...}}
+			# Handle both standard and escaped quotes in the error message
+			match = re.search(r"(?:\\)?'message(?:\\)?':\s*(?:\\)?'([^']+)(?:\\)?'", error_msg)
+			if match:
+				extracted_error = match.group(1)
+				self.logger.error(f'🔍 Extracted API Error: {extracted_error}')
+				if 'messages[1].content' in extracted_error:
+					self.logger.warning('⚠️ Disabling vision based on extracted API error.')
+					self.settings.use_vision = False
+			elif 'messages[1].content' in error_msg:
+				self.logger.warning('⚠️ Disabling vision based on error content (fallback).')
+				self.settings.use_vision = False
 		else:
 			self.logger.error(f'{prefix}{error_msg}')
 

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
-from contextlib import suppress
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 from flask.typing import ResponseReturnValue
-
-import requests
 
 from browser_use.model_selection import apply_model_selection, update_override
 

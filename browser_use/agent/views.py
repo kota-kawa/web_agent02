@@ -146,6 +146,7 @@ class AgentBrain(BaseModel):
 	evaluation_previous_goal: str
 	memory: str
 	next_goal: str
+	current_status: str
 
 
 class AgentOutput(BaseModel):
@@ -155,6 +156,7 @@ class AgentOutput(BaseModel):
 	evaluation_previous_goal: str | None = None
 	memory: str | None = None
 	next_goal: str | None = None
+	current_status: str | None = None
 	action: list[ActionModel] = Field(
 		...,
 		description='List of actions to execute',
@@ -164,7 +166,7 @@ class AgentOutput(BaseModel):
 	@classmethod
 	def model_json_schema(cls, **kwargs):
 		schema = super().model_json_schema(**kwargs)
-		schema['required'] = ['evaluation_previous_goal', 'memory', 'next_goal', 'action']
+		schema['required'] = ['evaluation_previous_goal', 'memory', 'next_goal', 'current_status', 'action']
 		return schema
 
 	@property
@@ -175,6 +177,7 @@ class AgentOutput(BaseModel):
 			evaluation_previous_goal=self.evaluation_previous_goal if self.evaluation_previous_goal else '',
 			memory=self.memory if self.memory else '',
 			next_goal=self.next_goal if self.next_goal else '',
+			current_status=self.current_status if self.current_status else '',
 		)
 
 	@staticmethod
@@ -202,7 +205,7 @@ class AgentOutput(BaseModel):
 			def model_json_schema(cls, **kwargs):
 				schema = super().model_json_schema(**kwargs)
 				del schema['properties']['thinking']
-				schema['required'] = ['evaluation_previous_goal', 'memory', 'next_goal', 'action']
+				schema['required'] = ['evaluation_previous_goal', 'memory', 'next_goal', 'current_status', 'action']
 				return schema
 
 		model = create_model(
