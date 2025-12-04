@@ -618,57 +618,18 @@ def check_conversation_history() -> ResponseReturnValue:
 		'run_summary': None,
 	}
 
-	# If action is needed, trigger the browser agent
+	# If action is needed, we currently DO NOT trigger the browser agent automatically.
+	# We just inform the platform that an action is possible.
 	if analysis.get('needs_action') and analysis.get('task_description'):
 		task_description = analysis['task_description']
+		# Update reply to include the proposed task if not already present
+		if not response_data.get('reply'):
+			response_data['reply'] = f'ブラウザ操作が可能です: {task_description}'
+			response_data['should_reply'] = True
 
-		try:
-			controller = _get_agent_controller()
-		except AgentControllerError as exc:
-			logger.warning('Failed to initialize agent controller: %s', exc)
-			response_data['run_summary'] = f'エージェントの初期化に失敗しました: {exc}'
-			return jsonify(response_data), 200
-		except (OSError, RuntimeError, ValueError) as exc:
-			logger.warning('System error while initializing agent controller: %s', exc)
-			response_data['run_summary'] = f'エージェントの初期化中にシステムエラーが発生しました: {exc}'
-			return jsonify(response_data), 200
-		except Exception as exc:
-			logger.exception('Unexpected error while initializing agent controller')
-			response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
-			return jsonify(response_data), 200
-
-		# Check if agent is already running
-		if controller.is_running():
-			response_data['run_summary'] = 'エージェントは既に実行中です。後でもう一度お試しください。'
-			return jsonify(response_data), 409
-
-		# Execute the task
-		try:
-			run_result = controller.run(task_description)
-			agent_history = run_result.filtered_history or run_result.history
-
-			# Format the result
-			summary_message = _summarize_history(agent_history)
-			response_data['action_taken'] = True
-			response_data['run_summary'] = summary_message
-			response_data['agent_history'] = {
-				'steps': len(agent_history.history),
-				'success': agent_history.is_successful(),
-				'final_result': agent_history.final_result(),
-			}
-			if not response_data.get('reply'):
-				response_data['reply'] = summary_message
-				response_data['should_reply'] = True
-
-		except AgentControllerError as exc:
-			logger.warning('Failed to execute browser agent task: %s', exc)
-			response_data['run_summary'] = f'エージェントの実行に失敗しました: {exc}'
-		except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
-			logger.warning('System error during browser agent execution: %s', exc)
-			response_data['run_summary'] = f'エージェントの実行中にシステムエラーが発生しました: {exc}'
-		except Exception as exc:
-			logger.exception('Unexpected error while executing browser agent task')
-			response_data['run_summary'] = f'予期しないエラーが発生しました: {exc}'
+		# We do NOT execute the task here.
+		response_data['action_taken'] = False
+		response_data['run_summary'] = f'ブラウザ操作が提案されましたが、自動実行は無効化されています: {task_description}'
 
 	return jsonify(response_data), 200
 

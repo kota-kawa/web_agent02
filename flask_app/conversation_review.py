@@ -207,6 +207,8 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
 	# Create a prompt to analyze the conversation
 	analysis_prompt = f"""以下の会話履歴を分析し、(1)ブラウザ操作が必要か、(2)ブラウザエージェントとして一言でも発言したほうがよいかを判断してください。
 
+アドバイス程度なら送る必要はなく、自分が何か役に立てそうなときのみ送信するようにしてください。
+
 会話履歴:
 {conversation_text}
 
