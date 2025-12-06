@@ -5,6 +5,7 @@ This implementation adds a new endpoint `/api/check-conversation-history` that a
 
 ## Additional Behavior Adjustments
 - Browser agent tools now exclude the `read_file` action and the system prompt explicitly forbids it, preventing the LLM from generating or selecting `read_file` tasks (flask_app/controller.py, flask_app/system_prompt_browser_agent.md).
+- System prompt strengthens “act-first” guidance so the browser agent proceeds without unnecessary確認質問 when orchestrator-provided tasks are sufficiently clear, using reasonable defaults for general info gathering (flask_app/system_prompt_browser_agent.md).
 
 ## Problem Statement (Japanese)
 他のエージェントから、会話履歴が送信されてくる時がある。そのために、受け入れるためのエンドポイントを新規で作成してほしい。そして、その会話履歴を確認して、何か問題が発生していて、ブラウザ操作をして解決できそうな場合には、既存のロジックを使って、解決のために操作を実行してほしい。特に何もしなくてよさそうならば、何もしないようにしてほしい。つまり、会話履歴のチェック用のエンドポイントと、それに対するLLMがjsonを出力して、その出力をチェックして処理をするコードを書いてほしい。

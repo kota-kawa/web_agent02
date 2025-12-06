@@ -20,6 +20,7 @@ class HistoryItem(BaseModel):
 	memory: str | None = None
 	next_goal: str | None = None
 	current_status: str | None = None
+	persistent_notes: str | None = None
 	action_results: str | None = None
 	error: str | None = None
 	system_message: str | None = None
@@ -99,5 +100,6 @@ class MessageManagerState(BaseModel):
 		default_factory=lambda: [HistoryItem(step_number=0, system_message='Agent initialized')]
 	)
 	read_state_description: str = ''
+	persistent_notes: str = ''  # Accumulated notes that persist across history truncation
 
 	model_config = ConfigDict(arbitrary_types_allowed=True)

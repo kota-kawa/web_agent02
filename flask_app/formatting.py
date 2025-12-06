@@ -155,6 +155,8 @@ def _format_step_plan(
 		lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
 	if model_output.current_status:
 		lines.append('現在の状況: ' + _truncate(_compact_text(model_output.current_status), 120))
+	if model_output.persistent_notes:
+		lines.append('永続メモ: ' + _truncate(_compact_text(model_output.persistent_notes), 200))
 
 	return '\n'.join(lines)
 

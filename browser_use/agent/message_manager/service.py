@@ -136,15 +136,23 @@ class MessageManager:
 	@property
 	def agent_history_description(self) -> str:
 		"""Build agent history description from list of items, respecting max_history_items limit"""
+		parts = []
+		
+		# Include persistent notes at the top if they exist
+		if self.state.persistent_notes:
+			parts.append(f'<persistent_notes>\n{self.state.persistent_notes}\n</persistent_notes>')
+		
 		if self.max_history_items is None:
 			# Include all items
-			return '\n'.join(item.to_string() for item in self.state.agent_history_items)
+			parts.append('\n'.join(item.to_string() for item in self.state.agent_history_items))
+			return '\n'.join(parts)
 
 		total_items = len(self.state.agent_history_items)
 
 		# If we have fewer items than the limit, just return all items
 		if total_items <= self.max_history_items:
-			return '\n'.join(item.to_string() for item in self.state.agent_history_items)
+			parts.append('\n'.join(item.to_string() for item in self.state.agent_history_items))
+			return '\n'.join(parts)
 
 		# We have more items than the limit, so we need to omit some
 		omitted_count = total_items - self.max_history_items
@@ -160,7 +168,8 @@ class MessageManager:
 		# Add most recent items
 		items_to_include.extend([item.to_string() for item in self.state.agent_history_items[-recent_items_count:]])
 
-		return '\n'.join(items_to_include)
+		parts.append('\n'.join(items_to_include))
+		return '\n'.join(parts)
 
 	def add_new_task(self, new_task: str) -> None:
 		new_task = '<follow_up_user_request> ' + new_task.strip() + ' </follow_up_user_request>'
@@ -229,11 +238,16 @@ class MessageManager:
 					history_item = HistoryItem(step_number=step_number, error='Agent failed to output in the right format.')
 					self.state.agent_history_items.append(history_item)
 		else:
+			# Update persistent notes if provided by the model
+			if model_output.persistent_notes:
+				self.state.persistent_notes = model_output.persistent_notes
+			
 			history_item = HistoryItem(
 				step_number=step_number,
 				evaluation_previous_goal=model_output.current_state.evaluation_previous_goal,
 				memory=model_output.current_state.memory,
 				next_goal=model_output.current_state.next_goal,
+				persistent_notes=model_output.persistent_notes,
 				action_results=action_results,
 			)
 			self.state.agent_history_items.append(history_item)

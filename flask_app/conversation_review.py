@@ -280,10 +280,16 @@ JSONのみで出力:
 		return _build_error_response(f'予期しないエラーが発生しました: {exc}')
 	finally:
 		if llm:
-			try:
-				await llm.aclose()
-			except Exception:
-				logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
+			aclose = getattr(llm, 'aclose', None)
+			if callable(aclose):
+				try:
+					await aclose()
+				except RuntimeError as close_exc:
+					# Suppress "Event loop is closed" errors from httpx/anyio during cleanup
+					if 'Event loop is closed' not in str(close_exc):
+						logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
+				except Exception:
+					logger.debug('Failed to close LLM client during conversation analysis', exc_info=True)
 
 
 def _analyze_conversation_history(

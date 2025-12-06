@@ -147,6 +147,7 @@ class AgentBrain(BaseModel):
 	memory: str
 	next_goal: str
 	current_status: str
+	persistent_notes: str | None = None
 
 
 class AgentOutput(BaseModel):
@@ -157,6 +158,7 @@ class AgentOutput(BaseModel):
 	memory: str | None = None
 	next_goal: str | None = None
 	current_status: str | None = None
+	persistent_notes: str | None = None
 	action: list[ActionModel] = Field(
 		...,
 		description='List of actions to execute',
@@ -178,6 +180,7 @@ class AgentOutput(BaseModel):
 			memory=self.memory if self.memory else '',
 			next_goal=self.next_goal if self.next_goal else '',
 			current_status=self.current_status if self.current_status else '',
+			persistent_notes=self.persistent_notes,
 		)
 
 	@staticmethod
@@ -354,6 +357,9 @@ class AgentHistory(BaseModel):
 			# Only include thinking if it's present
 			if self.model_output.thinking is not None:
 				model_output_dump['thinking'] = self.model_output.thinking
+			# Only include persistent_notes if it's present
+			if self.model_output.persistent_notes is not None:
+				model_output_dump['persistent_notes'] = self.model_output.persistent_notes
 
 		# Handle result serialization - don't filter ActionResult data
 		# as it should contain meaningful information for the agent
