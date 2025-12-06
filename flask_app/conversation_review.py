@@ -205,30 +205,49 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
 		conversation_text += f'{role}: {content}\n'
 
 	# Create a prompt to analyze the conversation
-	analysis_prompt = f"""以下の会話履歴を分析し、(1)ブラウザ操作が必要か、(2)ブラウザエージェントとして一言でも発言したほうがよいかを判断してください。
+	analysis_prompt = f"""あなたは「ブラウザ操作専門」のアシスタントです。
 
-アドバイス程度なら送る必要はなく、自分が何か役に立てそうなときのみ送信するようにしてください。
+【あなたの専門分野（発言可能な範囲）】
+- Web検索: 情報検索、調査、ニュース確認
+- Webページ操作: ナビゲーション、フォーム入力、データ抽出
+- オンラインサービス: 予約、購入、申し込み手続き
+- Webサイトの閲覧支援: 特定ページへのアクセス
+
+【発言してはいけない場合】
+- IoTデバイス操作 → IoT Agentの専門
+- 料理・洗濯・家庭科の知識 → Life-Assistant Agentの専門
+- スケジュール・予定・タスク管理 → Scheduler Agentの専門
+- ブラウザ操作が不要な一般的な質問
+
+【判断ルール】
+1. `needs_action: true` は、Webブラウザでの操作が「必須」な場合のみ
+2. `should_reply: true` は、ブラウザ操作の文脈で有益な情報がある場合のみ
+3. 他エージェントへの呼びかけ・任せる判断は禁止
+4. 自分の専門外の話題は完全に無視する
+
+【発言する例】
+- 「東京の天気を調べて」→ needs_action: true, action_type: "search"
+- 「Amazonで商品を検索して」→ needs_action: true
+
+【発言しない例】
+- 「エアコンをつけて」→ 発言しない（IoT Agentの専門）
+- 「夕食のレシピを教えて」→ 発言しない（Life-Assistantの専門）
+- 「明日の予定を追加して」→ 発言しない（Schedulerの専門）
 
 会話履歴:
 {conversation_text}
 
-判断ルール:
-- エラー・行き詰まり・不明点・追加確認など、少しでも役立つ発言があるなら `should_reply` を true にして短く提案してください。
-- 他のエージェント（Life-Assistant Agent, IoT Agent, Browser Agent）に任せる/呼びかける場合は、名前を明記してください。
-- ブラウザ操作で解決できそうなら具体的なタスクを `task_description` に書き、`needs_action` を true にしてください。
-
 JSONのみで出力:
 {{
   "should_reply": true/false,
-  "reply": "短い提案や注意喚起。他エージェントへの言及もここに含める。",
-  "addressed_agents": ["Browser Agent", "Life-Assistant Agent", "IoT Agent"],
+  "reply": "短い提案（ブラウザ操作の文脈に限定）",
+  "addressed_agents": [],
   "needs_action": true/false,
   "action_type": "search" | "navigate" | "form_fill" | "data_extract" | null,
   "task_description": "ブラウザに依頼する具体的タスク",
   "reason": "判断の理由"
 }}
-
-必ず有効なJSONだけを返してください。"""
+"""
 
 	try:
 		# Use LLM to generate structured analysis

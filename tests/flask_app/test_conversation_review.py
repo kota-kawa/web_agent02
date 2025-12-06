@@ -141,15 +141,7 @@ async def test_provider_error_fallbacks_to_text_parsing(mocker):
 	mock_llm_instance.ainvoke.side_effect = [
 		ModelProviderError('Tool use not allowed', status_code=405, model='claude'),
 		ChatInvokeCompletion(
-			completion={
-				'should_reply': True,
-				'reply': 'Fallback executed.',
-				'addressed_agents': ['Browser Agent'],
-				'needs_action': False,
-				'action_type': None,
-				'task_description': None,
-				'reason': 'Structured output unavailable.',
-			},
+			completion='{"should_reply": true, "reply": "Fallback executed.", "addressed_agents": ["Browser Agent"], "needs_action": false, "action_type": null, "task_description": null, "reason": "Structured output unavailable."}',
 			usage=None,
 		),
 	]
@@ -173,15 +165,14 @@ async def test_missing_fields_are_normalized(mocker):
 	"""Ensure missing optional fields are filled with safe defaults instead of raising."""
 
 	mock_llm_instance = AsyncMock()
-	mock_llm_instance.ainvoke.return_value = ChatInvokeCompletion(
-		completion={
+	mock_llm_instance.ainvoke.return_value = {
+		'completion': {
 			'should_reply': False,
 			'needs_action': True,
 			'action_type': 'search',
 			'task_description': 'Find pricing info for the product.',
-		},
-		usage=None,
-	)
+		}
+	}
 	mocker.patch(
 		'flask_app.conversation_review._create_selected_llm',
 		return_value=mock_llm_instance,
