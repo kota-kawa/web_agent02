@@ -215,7 +215,7 @@ async def _analyze_conversation_history_async(conversation_history: list[dict[st
 
 【発言してはいけない場合】
 - IoTデバイス操作 → IoT Agentの専門
-- 料理・洗濯・家庭科の知識 → Life-Assistant Agentの専門
+- 料理・洗濯・家庭科の知識 → Life-Style Agentの専門
 - スケジュール・予定・タスク管理 → Scheduler Agentの専門
 - ブラウザ操作が不要な一般的な質問
 
