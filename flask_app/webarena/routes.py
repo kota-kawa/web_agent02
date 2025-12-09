@@ -20,12 +20,12 @@ except Exception:
 
 # Default base URLs for WebArena environments
 DEFAULT_ENV_URLS = {
-    "shopping": "http://shopping.webarena.local",
-    "shopping_admin": "http://shopping_admin.webarena.local",
-    "gitlab": "http://gitlab.webarena.local",
-    "reddit": "http://reddit.webarena.local",
-    "map": "http://map.webarena.local",
-    "wikipedia": "http://wikipedia.webarena.local"
+    "shopping": os.getenv("WEBARENA_SHOPPING_URL", "http://shopping:80"),
+    "shopping_admin": os.getenv("WEBARENA_SHOPPING_ADMIN_URL", "http://shopping_admin:80"),
+    "gitlab": os.getenv("WEBARENA_GITLAB_URL", "http://gitlab:8023"),
+    "reddit": os.getenv("WEBARENA_REDDIT_URL", "http://forum:80"),
+    "map": os.getenv("WEBARENA_MAP_URL", "http://map:3000"),
+    "wikipedia": os.getenv("WEBARENA_WIKIPEDIA_URL", "http://wikipedia:80")
 }
 
 @webarena_bp.route('/webarena')

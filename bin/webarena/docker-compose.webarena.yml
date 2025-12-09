@@ -1,0 +1,95 @@
+version: '3.9'
+
+services:
+  # Main application (from parent docker-compose.yml)
+  browser-agent:
+    extends:
+      file: ../docker-compose.yml
+      service: browser-agent
+    networks:
+      - multi_agent_network
+    depends_on:
+      - browser
+      - shopping
+      - shopping_admin
+      - forum
+      - gitlab
+      - wikipedia
+    environment:
+      # Configure WebArena internal URLs
+      - WEBARENA_SHOPPING_URL=http://shopping:80
+      - WEBARENA_SHOPPING_ADMIN_URL=http://shopping_admin:80
+      - WEBARENA_GITLAB_URL=http://gitlab:8023
+      - WEBARENA_REDDIT_URL=http://forum:80
+      - WEBARENA_WIKIPEDIA_URL=http://wikipedia:80
+
+  browser:
+    extends:
+      file: ../docker-compose.yml
+      service: browser
+    networks:
+      - multi_agent_network
+
+  # WebArena Services
+  shopping:
+    image: shopping_final_0712
+    container_name: shopping
+    ports:
+      - "7770:80"
+    networks:
+      - multi_agent_network
+    command: >
+      bash -c "
+        /var/www/magento2/bin/magento setup:store-config:set --base-url='http://shopping:80/' &&
+        mysql -u magentouser -pMyPassword magentodb -e 'UPDATE core_config_data SET value=\"http://shopping:80/\" WHERE path = \"web/secure/base_url\";' &&
+        /var/www/magento2/bin/magento cache:flush &&
+        apache2-foreground
+      "
+
+  shopping_admin:
+    image: shopping_admin_final_0719
+    container_name: shopping_admin
+    ports:
+      - "7780:80"
+    networks:
+      - multi_agent_network
+    command: >
+      bash -c "
+        /var/www/magento2/bin/magento setup:store-config:set --base-url='http://shopping_admin:80/' &&
+        mysql -u magentouser -pMyPassword magentodb -e 'UPDATE core_config_data SET value=\"http://shopping_admin:80/\" WHERE path = \"web/secure/base_url\";' &&
+        /var/www/magento2/bin/magento cache:flush &&
+        apache2-foreground
+      "
+
+  forum:
+    image: postmill-populated-exposed-withimg
+    container_name: forum
+    ports:
+      - "9999:80"
+    networks:
+      - multi_agent_network
+
+  gitlab:
+    image: gitlab-populated-final-port8023
+    container_name: gitlab
+    ports:
+      - "8023:8023"
+    networks:
+      - multi_agent_network
+    command: /opt/gitlab/embedded/bin/runsvdir-start
+
+  wikipedia:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia
+    ports:
+      - "8888:80"
+    volumes:
+      - ./webarena_data:/data
+    command: wikipedia_en_all_maxi_2022-05.zim
+    networks:
+      - multi_agent_network
+
+networks:
+  multi_agent_network:
+    external: true
+    name: ${MULTI_AGENT_NETWORK:-multi_agent_platform_net}
