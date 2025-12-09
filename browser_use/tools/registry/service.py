@@ -11,6 +11,7 @@ from typing import Any, Generic, Optional, TypeVar, Union, get_args, get_origin
 import pyotp
 from pydantic import BaseModel, Field, RootModel, create_model
 
+from browser_use.agent.scratchpad import Scratchpad
 from browser_use.browser import BrowserSession
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.llm.base import BaseChatModel
@@ -52,6 +53,7 @@ class Registry(Generic[Context]):
 			'available_file_paths': list,
 			'has_sensitive_data': bool,
 			'file_system': FileSystem,
+			'scratchpad': Scratchpad,
 		}
 
 	def _normalize_action_function_signature(
@@ -317,6 +319,7 @@ class Registry(Generic[Context]):
 		file_system: FileSystem | None = None,
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		available_file_paths: list[str] | None = None,
+		scratchpad: Scratchpad | None = None,
 	) -> Any:
 		"""Execute a registered action with simplified parameter handling"""
 		if action_name not in self.registry.actions:
@@ -352,6 +355,7 @@ class Registry(Generic[Context]):
 				'available_file_paths': available_file_paths,
 				'has_sensitive_data': action_name == 'input_text' and bool(sensitive_data),
 				'file_system': file_system,
+				'scratchpad': scratchpad,
 			}
 
 			# Only pass sensitive_data to actions that explicitly need it (input_text)

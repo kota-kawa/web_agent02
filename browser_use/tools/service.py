@@ -11,6 +11,7 @@ except ImportError:
 	Laminar = None  # type: ignore
 from pydantic import BaseModel
 
+from browser_use.agent.scratchpad import Scratchpad
 from browser_use.agent.views import ActionModel, ActionResult
 from browser_use.browser import BrowserSession
 from browser_use.browser.events import (
@@ -41,6 +42,11 @@ from browser_use.tools.views import (
 	GoToUrlAction,
 	InputTextAction,
 	NoParamsAction,
+	ScratchpadAddAction,
+	ScratchpadClearAction,
+	ScratchpadGetAction,
+	ScratchpadRemoveAction,
+	ScratchpadUpdateAction,
 	ScrollAction,
 	SearchGoogleAction,
 	SelectDropdownOptionAction,
@@ -111,6 +117,7 @@ class Tools(Generic[Context]):
 
 		"""Register all default browser actions"""
 
+		self._register_scratchpad_actions()
 		self._register_done_action(output_model)
 
 		# Basic Navigation Actions
@@ -1011,9 +1018,7 @@ You can also use it to explore the website.
 					# Primitive values (string, number, boolean)
 					result_text = str(value)
 
-				# Apply length limit with better truncation
-				if len(result_text) > 20000:
-					result_text = result_text[:19950] + '\n... [Truncated after 20000 characters]'
+				# Keep full result text (no truncation) so UI/external consumers can inspect everything
 				msg = f'Code: {code}\n\nResult: {result_text}'
 				logger.info(msg)
 				return ActionResult(extracted_content=f'Code: {code}\n\nResult: {result_text}')
@@ -1119,6 +1124,115 @@ You can also use it to explore the website.
 		chars_filtered = original_length - len(content)
 		return content, chars_filtered
 
+	def _register_scratchpad_actions(self) -> None:
+		"""Register Scratchpad (外部メモ) actions for structured data collection."""
+
+		@self.registry.action(
+			"""【Scratchpad】構造化データをメモ帳に追加。収集した情報を一時保存し、タスク終了時にまとめて報告できます。
+例: 店舗情報（店名、座敷有無、評価）、比較データ、検索結果など。
+- key: エントリの識別子（例: "店舗A"）
+- data: 構造化データ（例: {"座敷": "あり", "評価": 4.5, "価格帯": "3000-5000円"}）
+- source_url: 情報取得元のURL（省略可）
+- notes: 追加メモ（省略可）""",
+			param_model=ScratchpadAddAction,
+		)
+		async def scratchpad_add(params: ScratchpadAddAction, scratchpad: Scratchpad):
+			entry = scratchpad.add_entry(
+				key=params.key,
+				data=params.data,
+				source_url=params.source_url,
+				notes=params.notes,
+			)
+			memory = f'Scratchpadに追加: {params.key} (データ{len(params.data)}件)'
+			msg = f'📝 {memory}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=f'Scratchpadに追加しました:\n{entry.to_summary()}',
+				long_term_memory=memory,
+			)
+
+		@self.registry.action(
+			"""【Scratchpad】既存のエントリを更新。
+- key: 更新するエントリのキー
+- data: 更新するデータ（mergeがTrueなら既存データとマージ）
+- notes: 更新するメモ
+- merge: True=既存データとマージ、False=完全に置換""",
+			param_model=ScratchpadUpdateAction,
+		)
+		async def scratchpad_update(params: ScratchpadUpdateAction, scratchpad: Scratchpad):
+			entry = scratchpad.update_entry(
+				key=params.key,
+				data=params.data,
+				notes=params.notes,
+				merge=params.merge,
+			)
+			if entry is None:
+				return ActionResult(error=f'Scratchpadにキー "{params.key}" が見つかりません')
+
+			memory = f'Scratchpadを更新: {params.key}'
+			msg = f'📝 {memory}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=f'Scratchpadを更新しました:\n{entry.to_summary()}',
+				long_term_memory=memory,
+			)
+
+		@self.registry.action(
+			'【Scratchpad】エントリを削除。key: 削除するエントリのキー',
+			param_model=ScratchpadRemoveAction,
+		)
+		async def scratchpad_remove(params: ScratchpadRemoveAction, scratchpad: Scratchpad):
+			success = scratchpad.remove_entry(params.key)
+			if not success:
+				return ActionResult(error=f'Scratchpadにキー "{params.key}" が見つかりません')
+
+			memory = f'Scratchpadから削除: {params.key}'
+			msg = f'📝 {memory}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=f'Scratchpadから "{params.key}" を削除しました',
+				long_term_memory=memory,
+			)
+
+		@self.registry.action(
+			"""【Scratchpad】保存された情報を取得。
+- key: 取得するエントリのキー（省略時は全エントリのサマリーを表示）
+タスク終了前にScratchpadの内容を確認し、doneアクションで報告する際に活用できます。""",
+			param_model=ScratchpadGetAction,
+		)
+		async def scratchpad_get(params: ScratchpadGetAction, scratchpad: Scratchpad):
+			if params.key:
+				entry = scratchpad.get_entry(params.key)
+				if entry is None:
+					return ActionResult(error=f'Scratchpadにキー "{params.key}" が見つかりません')
+				content = entry.to_summary()
+			else:
+				content = scratchpad.to_summary()
+
+			memory = f'Scratchpadを取得: {params.key or "全件"}（{scratchpad.count()}件）'
+			msg = f'📝 {memory}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=content,
+				long_term_memory=memory,
+				include_extracted_content_only_once=True,
+			)
+
+		@self.registry.action(
+			'【Scratchpad】すべてのエントリをクリア。収集データを全削除します。',
+			param_model=ScratchpadClearAction,
+		)
+		async def scratchpad_clear(_: ScratchpadClearAction, scratchpad: Scratchpad):
+			count = scratchpad.count()
+			scratchpad.clear()
+			memory = f'Scratchpadをクリア: {count}件を削除'
+			msg = f'📝 {memory}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=f'Scratchpadをクリアしました（{count}件削除）',
+				long_term_memory=memory,
+			)
+
 	def _register_done_action(self, output_model: type[T] | None, display_files_in_done_text: bool = True):
 		if output_model is not None:
 			self.display_files_in_done_text = display_files_in_done_text
@@ -1216,6 +1330,7 @@ You can also use it to explore the website.
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
 		available_file_paths: list[str] | None = None,
 		file_system: FileSystem | None = None,
+		scratchpad: Scratchpad | None = None,
 	) -> ActionResult:
 		"""Execute an action"""
 
@@ -1247,6 +1362,7 @@ You can also use it to explore the website.
 							file_system=file_system,
 							sensitive_data=sensitive_data,
 							available_file_paths=available_file_paths,
+							scratchpad=scratchpad,
 						)
 					except BrowserError as e:
 						logger.error(f'❌ Action {action_name} failed with BrowserError: {str(e)}')

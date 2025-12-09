@@ -117,7 +117,7 @@ class ChatGoogle(BaseChatModel):
 		self,
 		gemini_messages: list[dict[str, Any]],
 		generation_config: dict[str, Any],
-		system_instruction: dict[str, Any] | None = None
+		system_instruction: dict[str, Any] | None = None,
 	) -> httpx.Response:
 		url = f'{self.base_url}/models/{self.model}:generateContent'
 		headers = {
@@ -190,9 +190,60 @@ class ChatGoogle(BaseChatModel):
 				parsed_content = self._parse_json_output(content_text, output_format)
 				return ChatInvokeCompletion(completion=parsed_content, usage=None)
 			except (json.JSONDecodeError, ValueError) as e:
+				# JSON parse error - attempt retry with corrective prompt
+				retry_result = await self._retry_json_parse(
+					gemini_messages, generation_config, system_instruction, content_text, output_format, e
+				)
+				if retry_result is not None:
+					return ChatInvokeCompletion(completion=retry_result, usage=None)
 				raise ModelProviderError(f'Failed to parse model output as JSON: {e}', model=self.name) from e
 		else:
 			return ChatInvokeCompletion(completion=content_text, usage=None)
+
+	async def _retry_json_parse(
+		self,
+		original_messages: list[dict[str, Any]],
+		generation_config: dict[str, Any],
+		system_instruction: dict[str, Any] | None,
+		failed_output: str,
+		output_format: type[T],
+		original_error: Exception,
+		max_retries: int = 2,
+	) -> T | None:
+		"""Retry JSON parsing with corrective prompts when initial parse fails."""
+		# Truncate long outputs for the correction prompt
+		truncated_output = failed_output[:2000] + '...' if len(failed_output) > 2000 else failed_output
+
+		correction_prompt = f"""あなたの前回の出力はJSONとして不正でした。以下のエラーが発生しました:
+{str(original_error)[:500]}
+
+前回の出力（一部）:
+{truncated_output}
+
+以下の点に注意して、正しいJSONを再出力してください：
+1. 文字列内の改行は \\n でエスケープする
+2. 文字列内のダブルクォートは \\" でエスケープする
+3. 制御文字（タブ等）は適切にエスケープする
+4. JSONの構文（カンマ、括弧の対応）を確認する
+
+正しいJSON形式のみを出力してください。説明や追加のテキストは不要です。"""
+
+		retry_messages = original_messages + [{'role': 'user', 'parts': [{'text': correction_prompt}]}]
+
+		for attempt in range(max_retries):
+			try:
+				response = await self._send_request(retry_messages, generation_config, system_instruction)
+				response_data = response.json()
+				content_text = response_data['candidates'][0]['content']['parts'][0]['text']
+				return self._parse_json_output(content_text, output_format)
+			except (json.JSONDecodeError, ValueError, KeyError, IndexError):
+				if attempt == max_retries - 1:
+					return None
+				continue
+			except Exception:
+				return None
+
+		return None
 
 	async def aclose(self) -> None:
 		"""Close the underlying HTTP client."""
@@ -207,32 +258,78 @@ class ChatGoogle(BaseChatModel):
 	def _parse_json_output(self, text: str, output_format: type[T]) -> T:
 		raw_text = text.strip()
 
+		def _sanitize_json_string(s: str) -> str:
+			"""Sanitize JSON string by escaping problematic characters."""
+			# Fix common JSON issues in LLM output
+			# 1. Replace unescaped newlines within string values
+			# 2. Replace unescaped tabs
+			# 3. Fix unescaped quotes in string values
+
+			# First, try to fix control characters within JSON string values
+			# This regex finds string values and escapes control chars within them
+			def escape_control_chars(match: re.Match) -> str:
+				content = match.group(1)
+				# Escape unescaped control characters
+				content = content.replace('\n', '\\n')
+				content = content.replace('\r', '\\r')
+				content = content.replace('\t', '\\t')
+				# Handle unescaped backslashes that aren't part of escape sequences
+				# Be careful not to double-escape already escaped sequences
+				return f'"{content}"'
+
+			# Try to fix strings with unescaped control characters
+			# Match JSON strings (simplified pattern)
+			try:
+				# Pattern to find string values in JSON
+				result = re.sub(
+					r'"((?:[^"\\]|\\.)*)(?:\n|\r|\t)((?:[^"\\]|\\.)*)"',
+					lambda m: f'"{m.group(1)}\\n{m.group(2)}"',
+					s,
+				)
+				return result
+			except Exception:
+				return s
+
 		def _extract_json_candidate(blob: str) -> str | None:
 			"""Pull a JSON object out of a mixed Gemini response."""
 			# Prefer fenced code blocks if present
-			fence_match = re.search(r'```(?:json)?\\s*([\\s\\S]*?)```', blob)
+			fence_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', blob)
 			if fence_match:
 				return fence_match.group(1).strip()
 
 			# Otherwise grab the first JSON-looking object
-			brace_match = re.search(r'\\{[\\s\\S]*\\}', blob)
+			brace_match = re.search(r'\{[\s\S]*\}', blob)
 			if brace_match:
 				return brace_match.group(0).strip()
 
 			return None
 
+		# Build list of candidates to try
 		candidates: list[str] = [raw_text]
 		extracted = _extract_json_candidate(raw_text)
 		if extracted and extracted not in candidates:
 			candidates.append(extracted)
 
+		# Also try sanitized versions
+		sanitized_raw = _sanitize_json_string(raw_text)
+		if sanitized_raw != raw_text and sanitized_raw not in candidates:
+			candidates.append(sanitized_raw)
+
+		if extracted:
+			sanitized_extracted = _sanitize_json_string(extracted)
+			if sanitized_extracted != extracted and sanitized_extracted not in candidates:
+				candidates.append(sanitized_extracted)
+
+		last_error: Exception | None = None
 		for candidate in candidates:
 			try:
 				return output_format.model_validate_json(candidate)
-			except (ValueError, json.JSONDecodeError):
+			except (ValueError, json.JSONDecodeError) as e:
+				last_error = e
 				try:
 					return output_format.model_validate(json.loads(candidate))
-				except Exception:
+				except Exception as e2:
+					last_error = e2
 					continue
 
-		raise ValueError(f'Failed to decode JSON from model output: {text}')
+		raise ValueError(f'Failed to decode JSON from model output: {text[:500]}... Error: {last_error}')

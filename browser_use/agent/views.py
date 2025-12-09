@@ -13,6 +13,7 @@ from typing_extensions import TypeVar
 from uuid_extensions import uuid7str
 
 from browser_use.agent.message_manager.views import MessageManagerState
+from browser_use.agent.scratchpad import Scratchpad
 from browser_use.browser.views import BrowserStateHistory
 from browser_use.dom.views import DEFAULT_INCLUDE_ATTRIBUTES, DOMInteractedElement, DOMSelectorMap
 
@@ -76,6 +77,9 @@ class AgentState(BaseModel):
 
 	message_manager_state: MessageManagerState = Field(default_factory=MessageManagerState)
 	file_system_state: FileSystemState | None = None
+
+	# Scratchpad - 外部メモ機能（構造化データの一時保存）
+	scratchpad: Scratchpad = Field(default_factory=Scratchpad)
 
 
 @dataclass

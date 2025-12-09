@@ -21,11 +21,11 @@ VISION_CAPABLE_PROVIDERS = {'claude', 'gemini', 'openai'}
 _NON_MULTIMODAL_MODELS_LOWER = {model.lower() for model in NON_MULTIMODAL_MODELS}
 
 _LANGUAGE_EXTENSION = (
-	'### 追加の言語ガイドライン\n'
-	'- すべての思考過程、行動の評価、メモリ、次の目標、最終報告などの文章は必ず自然な日本語で記述してください。\n'
-	'- 成功や失敗などのステータスも日本語（例: 成功、失敗、未確定）で明示してください。\n'
-	'- Webページ上の固有名詞や引用、ユーザーに提示する必要がある原文テキストは、そのままの言語で保持しても問題ありません。\n'
-	'- GoogleやDuckDuckGoなどの検索エンジンは使用しないでください。yahoo.co.jpを基本的には使用してください。\n'
+	'### Additional Language Guidelines\n'
+	'- All thought processes, action evaluations, memories, next goals, final reports, etc., must be written in natural Japanese.\n'
+	'- Statuses such as success or failure must also be explicitly stated in Japanese (e.g., 成功, 失敗, 不明).\n'
+	'- Proper nouns, quotes, or original text on web pages that need to be presented to the user may be kept in their original language.\n'
+	'- Do not use search engines like Google or DuckDuckGo. Basically use yahoo.co.jp.\n'
 )
 
 _SYSTEM_PROMPT_FILENAME = 'system_prompt_browser_agent.md'
@@ -99,7 +99,7 @@ def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS
 			template,
 		)
 
-	current_datetime_line = datetime.now().strftime('現在の日時ー%Y年%m月%d日%H時%M分')
+	current_datetime_line = datetime.now().strftime('Current Date/Time: %Y-%m-%d %H:%M')
 	# Avoid str.format() so literal braces in the template (e.g., action schemas) are preserved
 	# without triggering KeyError for names like "go_to_url".
 	template = template.replace('{max_actions}', str(max_actions_per_step))

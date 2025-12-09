@@ -33,26 +33,20 @@ def _append_final_response_notice(message: str) -> str:
 
 
 def _compact_text(text: str) -> str:
-	return ' '.join(text.split())
+	return text.strip()
 
 
-def _truncate(text: str, limit: int) -> str:
-	if len(text) <= limit:
-		return text
-	return text[: limit - 1] + '…'
-
-
-def _stringify_value(value: Any, limit: int = 60) -> str:
+def _stringify_value(value: Any) -> str:
+	"""Format a value as string without truncation."""
 	if isinstance(value, str):
-		cleaned = _compact_text(value)
+		return value.strip()
 	elif isinstance(value, (dict, list)):
 		try:
-			cleaned = _compact_text(json.dumps(value, ensure_ascii=False))
+			return json.dumps(value, ensure_ascii=False, indent=2)
 		except TypeError:
-			cleaned = _compact_text(str(value))
+			return str(value)
 	else:
-		cleaned = _compact_text(str(value))
-	return _truncate(cleaned, limit)
+		return str(value)
 
 
 def _format_action(action) -> str:
@@ -75,23 +69,24 @@ def _format_action(action) -> str:
 
 
 def _format_result(result: ActionResult) -> str:
+	"""Format action result without truncation."""
 	if result.error:
-		return _truncate(_compact_text(result.error), 160)
+		return _compact_text(result.error)
 
 	segments: list[str] = []
 	if result.is_done:
 		status = '成功' if result.success else '失敗'
 		segments.append(f'完了[{status}]')
 	if result.extracted_content:
-		segments.append(_truncate(_compact_text(result.extracted_content), 160))
+		segments.append(_compact_text(result.extracted_content))
 	if result.long_term_memory:
-		segments.append(_truncate(_compact_text(result.long_term_memory), 160))
+		segments.append(_compact_text(result.long_term_memory))
 	if not segments and result.metadata:
 		try:
 			metadata_text = json.dumps(result.metadata, ensure_ascii=False)
 		except TypeError:
 			metadata_text = str(result.metadata)
-		segments.append(_truncate(_compact_text(metadata_text), 120))
+		segments.append(_compact_text(metadata_text))
 
 	return ' / '.join(segments) if segments else ''
 
@@ -102,7 +97,7 @@ def _format_step_entry(index: int, step: Any) -> str:
 	if state:
 		page_parts: list[str] = []
 		if getattr(state, 'title', None):
-			page_parts.append(_truncate(_compact_text(state.title), 80))
+			page_parts.append(_compact_text(state.title))
 		if getattr(state, 'url', None):
 			page_parts.append(state.url)
 		# if page_parts:
@@ -114,11 +109,11 @@ def _format_step_entry(index: int, step: Any) -> str:
 		if action_lines:
 			lines.append('アクション: ' + ' / '.join(action_lines))
 		if model_output.evaluation_previous_goal:
-			lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
+			lines.append('評価: ' + _compact_text(model_output.evaluation_previous_goal))
 		if model_output.next_goal:
-			lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+			lines.append('次の目標: ' + _compact_text(model_output.next_goal))
 		if model_output.current_status:
-			lines.append('現在の状況: ' + _truncate(_compact_text(model_output.current_status), 120))
+			lines.append('現在の状況: ' + _compact_text(model_output.current_status))
 
 	result_lines = [text for text in (_format_result(r) for r in getattr(step, 'result', [])) if text]
 	if result_lines:
@@ -145,18 +140,19 @@ def _format_step_plan(
 	state: BrowserStateSummary,
 	model_output: AgentOutput,
 ) -> str:
+	"""Format a step plan without truncation."""
 	lines: list[str] = [f'ステップ{step_number}']
 
 	if model_output.evaluation_previous_goal:
-		lines.append('評価: ' + _truncate(_compact_text(model_output.evaluation_previous_goal), 120))
+		lines.append('評価: ' + _compact_text(model_output.evaluation_previous_goal))
 	if model_output.memory:
-		lines.append('メモリ: ' + _truncate(_compact_text(model_output.memory), 120))
+		lines.append('メモリ: ' + _compact_text(model_output.memory))
 	if model_output.next_goal:
-		lines.append('次の目標: ' + _truncate(_compact_text(model_output.next_goal), 120))
+		lines.append('次の目標: ' + _compact_text(model_output.next_goal))
 	if model_output.current_status:
-		lines.append('現在の状況: ' + _truncate(_compact_text(model_output.current_status), 120))
+		lines.append('現在の状況: ' + _compact_text(model_output.current_status))
 	if model_output.persistent_notes:
-		lines.append('永続メモ: ' + _truncate(_compact_text(model_output.persistent_notes), 200))
+		lines.append('永続メモ: ' + _compact_text(model_output.persistent_notes))
 
 	return '\n'.join(lines)
 
@@ -175,7 +171,7 @@ def _summarize_history(history: AgentHistoryList) -> str:
 
 	final_text = history.final_result()
 	if final_text:
-		lines.append('最終報告: ' + _truncate(_compact_text(final_text), 200))
+		lines.append('最終報告: ' + _compact_text(final_text))
 
 	if history.history:
 		last_state = history.history[-1].state

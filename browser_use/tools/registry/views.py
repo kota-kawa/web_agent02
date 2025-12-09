@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from browser_use.agent.scratchpad import Scratchpad
 from browser_use.browser import BrowserSession
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.llm.base import BaseChatModel
@@ -154,6 +155,7 @@ class SpecialActionParameters(BaseModel):
 	file_system: FileSystem | None = None
 	available_file_paths: list[str] | None = None
 	has_sensitive_data: bool = False
+	scratchpad: Scratchpad | None = None
 
 	@classmethod
 	def get_browser_requiring_params(cls) -> set[str]:

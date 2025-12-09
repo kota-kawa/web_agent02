@@ -56,7 +56,7 @@ class HistoryItem(BaseModel):
 			# Only include next_goal if it's not None/empty
 			if self.next_goal:
 				content_parts.append(f'{self.next_goal}')
-            
+
 			# Only include current_status if it's not None/empty
 			if self.current_status:
 				content_parts.append(f'現在の状況: {self.current_status}')

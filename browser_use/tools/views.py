@@ -95,3 +95,42 @@ class GetDropdownOptionsAction(BaseModel):
 class SelectDropdownOptionAction(BaseModel):
 	index: int = Field(ge=1, description='index of the dropdown element to select an option for')
 	text: str = Field(description='the text or exact value of the option to select')
+
+
+# Scratchpad Actions - 外部メモ機能
+
+
+class ScratchpadAddAction(BaseModel):
+	"""Scratchpadにエントリを追加するアクション"""
+
+	key: str = Field(description='エントリのキー（例: 店名、項目名）')
+	data: dict = Field(description='構造化データ（例: {"座敷": "あり", "評価": 4.5}）')
+	source_url: str | None = Field(default=None, description='情報取得元のURL（省略可）')
+	notes: str | None = Field(default=None, description='追加メモ（省略可）')
+
+
+class ScratchpadUpdateAction(BaseModel):
+	"""Scratchpadの既存エントリを更新するアクション"""
+
+	key: str = Field(description='更新するエントリのキー')
+	data: dict | None = Field(default=None, description='更新するデータ')
+	notes: str | None = Field(default=None, description='更新するメモ')
+	merge: bool = Field(default=True, description='Trueで既存データとマージ、Falseで置換')
+
+
+class ScratchpadRemoveAction(BaseModel):
+	"""Scratchpadからエントリを削除するアクション"""
+
+	key: str = Field(description='削除するエントリのキー')
+
+
+class ScratchpadGetAction(BaseModel):
+	"""Scratchpadの内容を取得するアクション"""
+
+	key: str | None = Field(default=None, description='取得するエントリのキー（省略時は全エントリのサマリー）')
+
+
+class ScratchpadClearAction(BaseModel):
+	"""Scratchpadをクリアするアクション"""
+
+	pass

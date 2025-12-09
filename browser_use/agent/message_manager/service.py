@@ -137,11 +137,11 @@ class MessageManager:
 	def agent_history_description(self) -> str:
 		"""Build agent history description from list of items, respecting max_history_items limit"""
 		parts = []
-		
+
 		# Include persistent notes at the top if they exist
 		if self.state.persistent_notes:
 			parts.append(f'<persistent_notes>\n{self.state.persistent_notes}\n</persistent_notes>')
-		
+
 		if self.max_history_items is None:
 			# Include all items
 			parts.append('\n'.join(item.to_string() for item in self.state.agent_history_items))
@@ -212,10 +212,7 @@ class MessageManager:
 				logger.debug(f'Added extracted_content to action_results: {action_result.extracted_content}')
 
 			if action_result.error:
-				if len(action_result.error) > 200:
-					error_text = action_result.error[:100] + '......' + action_result.error[-100:]
-				else:
-					error_text = action_result.error
+				error_text = action_result.error
 				action_results += f'{error_text}\n'
 				logger.debug(f'Added error to action_results: {error_text}')
 
@@ -241,7 +238,7 @@ class MessageManager:
 			# Update persistent notes if provided by the model
 			if model_output.persistent_notes:
 				self.state.persistent_notes = model_output.persistent_notes
-			
+
 			history_item = HistoryItem(
 				step_number=step_number,
 				evaluation_previous_goal=model_output.current_state.evaluation_previous_goal,

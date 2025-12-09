@@ -57,7 +57,7 @@ from browser_use.agent.views import (
 )
 from browser_use.browser.constants import DEFAULT_NEW_TAB_URL
 from browser_use.browser.session import DEFAULT_BROWSER_PROFILE
-from browser_use.browser.views import BrowserStateSummary
+from browser_use.browser.views import PLACEHOLDER_4PX_SCREENSHOT, BrowserStateSummary
 from browser_use.config import CONFIG
 from browser_use.dom.views import DOMInteractedElement
 from browser_use.filesystem.file_system import FileSystem
@@ -1099,6 +1099,20 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			include_screenshot=True,  # always capture even if use_vision=False so that cloud sync is useful (it's fast now anyway)
 			include_recent_events=self.include_recent_events,
 		)
+
+		# Retry once if the DOM snapshot unexpectedly comes back empty on a normal page.
+		if self._should_retry_browser_state(browser_state_summary):
+			self.logger.debug('🔁 Empty DOM on loaded page detected, retrying browser state after short wait')
+			try:
+				await asyncio.sleep(0.6)
+				browser_state_summary = await self.browser_session.get_browser_state_summary(
+					cache_clickable_elements_hashes=True,
+					include_screenshot=True,
+					include_recent_events=self.include_recent_events,
+				)
+			except Exception:
+				self.logger.debug('🔁 Browser state retry failed', exc_info=True)
+
 		if browser_state_summary.screenshot:
 			self.logger.debug(f'📸 Got browser state WITH screenshot, length: {len(browser_state_summary.screenshot)}')
 		else:
@@ -1133,6 +1147,30 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		await self._force_done_after_last_step(step_info)
 		await self._force_done_after_failure()
 		return browser_state_summary
+
+	@staticmethod
+	def _should_retry_browser_state(state: BrowserStateSummary | None) -> bool:
+		"""Decide whether to retry fetching browser state when the DOM is unexpectedly empty."""
+
+		if state is None:
+			return False
+
+		# Skip retry for non-web pages, PDFs, or when errors are already reported.
+		if state.is_pdf_viewer or state.browser_errors:
+			return False
+
+		if not state.url or not state.url.startswith(('http://', 'https://')):
+			return False
+
+		# If we already have interactive elements, no need to retry.
+		if state.dom_state and state.dom_state.selector_map:
+			return False
+
+		# about:blank placeholder screenshot indicates the page truly is empty.
+		if state.screenshot == PLACEHOLDER_4PX_SCREENSHOT:
+			return False
+
+		return True
 
 	@observe_debug(ignore_input=True, name='get_next_action')
 	async def _get_next_action(self, browser_state_summary: BrowserStateSummary) -> None:
@@ -1333,12 +1371,49 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.AgentOutput = self.DoneAgentOutput
 
 	async def _get_model_output_with_retry(self, input_messages: list[BaseMessage]) -> AgentOutput:
-		"""Get model output with retry logic for empty actions"""
-		model_output = await self.get_model_output(input_messages)
-		current_step = self._current_step_number()
-		self.logger.debug(
-			f'✅ Step {current_step}: Got LLM response with {len(model_output.action) if model_output.action else 0} actions'
-		)
+		"""Get model output with retry logic for empty actions and JSON parse errors"""
+		max_json_retries = 2
+		last_error: Exception | None = None
+
+		for attempt in range(max_json_retries + 1):
+			try:
+				if attempt > 0:
+					# Add JSON correction hint for retry attempts
+					json_correction_message = UserMessage(
+						content=(
+							'あなたの前回の出力はJSONとして解析できませんでした。\n'
+							'以下の点に注意して、正しいJSONのみを出力してください：\n'
+							'1. 文字列内の改行は \\n でエスケープする\n'
+							'2. 文字列内のダブルクォートは \\" でエスケープする\n'
+							'3. 制御文字（タブ等）は適切にエスケープする\n'
+							'4. JSONの構文（カンマ、括弧の対応）を正しくする\n'
+							'5. 説明やマークダウンは含めず、純粋なJSONのみを出力する'
+						)
+					)
+					retry_messages = input_messages + [json_correction_message]
+					model_output = await self.get_model_output(retry_messages)
+				else:
+					model_output = await self.get_model_output(input_messages)
+
+				current_step = self._current_step_number()
+				self.logger.debug(
+					f'✅ Step {current_step}: Got LLM response with {len(model_output.action) if model_output.action else 0} actions'
+				)
+				break  # Success - exit retry loop
+
+			except (ValidationError, ValueError, json.JSONDecodeError) as e:
+				last_error = e
+				if attempt < max_json_retries:
+					self.logger.warning(f'⚠️ JSON parse error (attempt {attempt + 1}/{max_json_retries + 1}): {str(e)[:200]}')
+					continue
+				else:
+					self.logger.error(f'❌ JSON parse failed after {max_json_retries + 1} attempts: {str(e)[:200]}')
+					raise
+		else:
+			# All retries exhausted
+			if last_error:
+				raise last_error
+			raise RuntimeError('Failed to get model output after retries')
 
 		if (
 			not model_output.action
@@ -2192,6 +2267,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 					page_extraction_llm=self.settings.page_extraction_llm,
 					sensitive_data=self.sensitive_data,
 					available_file_paths=self.available_file_paths,
+					scratchpad=self.state.scratchpad,
 				)
 
 				time_end = time.time()

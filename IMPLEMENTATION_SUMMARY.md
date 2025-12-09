@@ -215,3 +215,157 @@ Potential improvements for future iterations:
 2. LLM responses are sanitized and validated before execution
 3. Browser agent operations use existing security measures
 4. Input validation prevents malformed requests
+
+---
+
+# Implementation Summary: Scratchpad (外部メモ機能)
+
+## Overview
+Scratchpadはエージェントの記憶（Context Window）だけに頼らず、収集した情報を一時保存する「メモ帳」領域です。構造化データを外部に保存し、タスク終了時にそこからまとめて回答を生成できます。
+
+## Problem Statement (Japanese)
+情報を保持できず、各個撃破になってしまう問題への対策として、エージェントの記憶（Context Window）だけに頼らず、収集した情報を一時保存する「メモ帳」領域をシステム的に用意します。「店名：〇〇、座敷：あり」といった構造化データを外部に保存し、タスク終了時にそこからまとめて回答を生成させます。
+
+## Implementation Details
+
+### Files Created
+
+1. **browser_use/agent/scratchpad.py** - Scratchpad本体
+   - `ScratchpadEntry` - 個別エントリのモデル
+   - `Scratchpad` - メモ帳クラス（追加・更新・削除・取得・クリア機能）
+   - レポート生成機能（text/markdown/json）
+   - 状態のシリアライズ/デシリアライズ
+
+### Files Modified
+
+1. **browser_use/agent/views.py**
+   - `AgentState`に`scratchpad: Scratchpad`フィールドを追加
+   - Scratchpadのインポートを追加
+
+2. **browser_use/tools/views.py**
+   - `ScratchpadAddAction` - 新規エントリ追加
+   - `ScratchpadUpdateAction` - 既存エントリ更新
+   - `ScratchpadRemoveAction` - エントリ削除
+   - `ScratchpadGetAction` - 情報取得
+   - `ScratchpadClearAction` - 全削除
+
+3. **browser_use/tools/service.py**
+   - Scratchpadアクションの登録（`_register_scratchpad_actions`）
+   - `act`メソッドに`scratchpad`パラメータを追加
+   - アクションハンドラーでScratchpadを操作
+
+4. **browser_use/agent/service.py**
+   - `multi_act`メソッドで`scratchpad=self.state.scratchpad`を渡すように変更
+
+5. **flask_app/system_prompt_browser_agent.md**
+   - `<scratchpad>`セクションを追加（使用方法の説明）
+   - `<action_schemas>`にScratchpadアクションのスキーマを追加
+
+## Key Features
+
+### 1. 構造化データの保存
+```python
+scratchpad.add_entry(
+    key="店舗A",
+    data={"座敷": "あり", "評価": 4.5, "価格帯": "3000-5000円"},
+    source_url="https://tabelog.com/...",
+    notes="駅から徒歩5分"
+)
+```
+
+### 2. エントリの更新
+```python
+scratchpad.update_entry(
+    key="店舗A",
+    data={"予約": "必要"},  # 既存データにマージ
+    merge=True
+)
+```
+
+### 3. サマリー生成
+```python
+print(scratchpad.to_summary())
+# 出力:
+# 【収集データ】（3件）
+# 1. 【店舗A】
+#   座敷: あり
+#   評価: 4.5
+# 2. 【店舗B】
+#   ...
+```
+
+### 4. レポート出力
+```python
+scratchpad.generate_report(format_type='markdown')
+# Markdown形式のレポートを生成
+```
+
+## Usage Example
+
+### エージェントでの使用
+```json
+// Step 1: 店舗Aの情報を収集後
+{
+  "action": [
+    {"scratchpad_add": {
+      "key": "店舗A",
+      "data": {"座敷": "あり", "評価": 4.2, "価格帯": "3000-5000円"},
+      "source_url": "https://tabelog.com/store-a/"
+    }}
+  ]
+}
+
+// Step 2: 店舗Bの情報を収集後
+{
+  "action": [
+    {"scratchpad_add": {
+      "key": "店舗B",
+      "data": {"座敷": "なし", "評価": 4.5, "価格帯": "2000-4000円"}
+    }}
+  ]
+}
+
+// Step 3: 収集データを確認してタスク完了
+{
+  "action": [
+    {"scratchpad_get": {"key": null}}
+  ]
+}
+// -> 全エントリのサマリーが返される
+
+// Step 4: 最終報告
+{
+  "action": [
+    {"done": {
+      "text": "調査結果:\n\n1. 店舗A: 座敷あり、評価4.2、3000-5000円\n2. 店舗B: 座敷なし、評価4.5、2000-4000円\n\n座敷ありで高評価の店舗Aをおすすめします。",
+      "success": true
+    }}
+  ]
+}
+```
+
+## Design Decisions
+
+### 1. AgentStateへの統合
+- Scratchpadは`AgentState`の一部として管理
+- エージェントのライフサイクルに連動
+- フォローアップタスクでも情報が保持される
+
+### 2. 既存機能との棲み分け
+| 機能 | 用途 |
+|------|------|
+| persistent_notes | 自由形式のメモ（履歴切り捨て後も保持） |
+| Scratchpad | 構造化データの収集・比較 |
+| file_system | 長文・ファイル出力 |
+
+### 3. アクションの命名
+- `scratchpad_`プレフィックスで他のアクションと区別
+- 直感的な操作名（add, update, remove, get, clear）
+
+## Future Enhancements
+
+1. Scratchpadの永続化（ファイルシステムへの自動保存）
+2. 複数Scratchpadのサポート（タスクごとに分離）
+3. テンプレートベースのレポート生成
+4. エントリの検索・フィルタリング機能
+5. done時に自動的にScratchpadの内容を含める機能

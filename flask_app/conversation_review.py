@@ -7,11 +7,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from browser_use.llm.exceptions import ModelProviderError
+from browser_use.llm.messages import SystemMessage, UserMessage
+
 from .config import logger
 from .exceptions import AgentControllerError
 from .llm_setup import _create_selected_llm
-from browser_use.llm.exceptions import ModelProviderError
-from browser_use.llm.messages import SystemMessage, UserMessage
 
 
 class ConversationAnalysis(BaseModel):
@@ -77,23 +78,48 @@ def _normalize_analysis_payload(payload: dict[str, Any] | None) -> dict[str, Any
 	return normalized
 
 
-def _extract_json_from_text(text: str) -> dict | None:
-	"""Extracts JSON from text, tolerating markdown code blocks."""
-	# Look for a JSON block ```json ... ```
-	json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', text)
-	if json_match:
-		try:
-			return json.loads(json_match.group(1))
-		except json.JSONDecodeError:
-			pass  # Fallback to the next method
+def _sanitize_json_string(text: str) -> str:
+	"""Sanitize a string for JSON parsing by fixing common LLM output issues."""
+	# Fix unescaped newlines in string values
+	# This is a simplified approach - replace literal newlines with escaped ones
+	# within what appears to be JSON string content
+	try:
+		result = re.sub(
+			r'"((?:[^"\\]|\\.)*)(?:\n|\r|\t)((?:[^"\\]|\\.)*)"',
+			lambda m: f'"{m.group(1)}\\n{m.group(2)}"',
+			text,
+		)
+		return result
+	except Exception:
+		return text
 
-	# Look for any JSON-like structure
-	json_match = re.search(r'\{[\s\S]*\}', text)
-	if json_match:
-		try:
-			return json.loads(json_match.group())
-		except json.JSONDecodeError:
-			return None
+
+def _extract_json_from_text(text: str) -> dict | None:
+	"""Extracts JSON from text, tolerating markdown code blocks and sanitizing."""
+	# Try to sanitize the text first
+	sanitized_text = _sanitize_json_string(text)
+
+	candidates = [text]
+	if sanitized_text != text:
+		candidates.append(sanitized_text)
+
+	for candidate in candidates:
+		# Look for a JSON block ```json ... ```
+		json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', candidate)
+		if json_match:
+			try:
+				return json.loads(json_match.group(1))
+			except json.JSONDecodeError:
+				pass  # Fallback to the next method
+
+		# Look for any JSON-like structure
+		json_match = re.search(r'\{[\s\S]*\}', candidate)
+		if json_match:
+			try:
+				return json.loads(json_match.group())
+			except json.JSONDecodeError:
+				continue
+
 	return None
 
 
@@ -113,6 +139,52 @@ def _get_completion_payload(response: Any) -> Any:
 	raise AttributeError('LLM response did not include a completion/result payload')
 
 
+async def _retry_with_json_correction(
+	llm: Any, messages: list[Any], failed_output: str, error: Exception, max_retries: int = 2
+) -> dict[str, Any] | None:
+	"""Retry LLM call with JSON correction prompt after parse failure."""
+	truncated_output = failed_output[:1500] + '...' if len(failed_output) > 1500 else failed_output
+
+	correction_message = UserMessage(
+		role='user',
+		content=f"""あなたの出力はJSONとして不正でした。エラー: {str(error)[:300]}
+
+前回の出力（一部）:
+{truncated_output}
+
+以下の点に注意して、正しいJSONのみを再出力してください：
+1. 文字列内の改行は \\n でエスケープする
+2. 文字列内のダブルクォートは \\" でエスケープする
+3. 制御文字（タブ等）は適切にエスケープする
+4. JSONの構文（カンマ、括弧の対応）を確認する
+5. 説明やマークダウンは含めず、純粋なJSONのみを出力する"""
+	)
+
+	retry_messages = messages + [correction_message]
+
+	for attempt in range(max_retries):
+		try:
+			response = await llm.ainvoke(retry_messages)
+			response_text = _get_completion_payload(response)
+
+			if isinstance(response_text, str):
+				extracted_json = _extract_json_from_text(response_text)
+				if extracted_json:
+					normalized = _normalize_analysis_payload(extracted_json)
+					return ConversationAnalysis.model_validate(normalized).model_dump()
+			elif isinstance(response_text, dict):
+				normalized = _normalize_analysis_payload(response_text)
+				return ConversationAnalysis.model_validate(normalized).model_dump()
+
+		except Exception as retry_error:
+			logger.debug(f'JSON correction retry {attempt + 1}/{max_retries} failed: {retry_error}')
+			if attempt == max_retries - 1:
+				return None
+			continue
+
+	return None
+
+
 async def _fallback_to_text_parsing(llm: Any, messages: list[Any]) -> dict[str, Any]:
 	"""Fallback path when structured output is unavailable."""
 	try:
@@ -128,6 +200,14 @@ async def _fallback_to_text_parsing(llm: Any, messages: list[Any]) -> dict[str, 
 			normalized = _normalize_analysis_payload(extracted_json)
 			analysis_result = ConversationAnalysis.model_validate(normalized)
 			return analysis_result.model_dump()
+
+		# If JSON extraction failed, try retry with correction prompt
+		if isinstance(response_text, str):
+			retry_result = await _retry_with_json_correction(
+				llm, messages, response_text, ValueError('JSON extraction failed')
+			)
+			if retry_result:
+				return retry_result
 
 		raise ValueError('Fallback parsing failed to produce a valid model.')
 
