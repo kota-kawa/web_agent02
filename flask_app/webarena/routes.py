@@ -3,6 +3,7 @@ from . import webarena_bp
 import logging
 import json
 import os
+import re
 from flask_app.env_utils import _BROWSER_URL
 from flask_app.formatting import _format_history_messages
 
@@ -18,7 +19,6 @@ except Exception:
     logger.warning("Could not load WebArena tasks from %s", TASKS_FILE)
 
 # Default base URLs for WebArena environments
-# In a real deployment, these should be configurable via env vars or UI
 DEFAULT_ENV_URLS = {
     "shopping": "http://shopping.webarena.local",
     "shopping_admin": "http://shopping_admin.webarena.local",
@@ -30,13 +30,10 @@ DEFAULT_ENV_URLS = {
 
 @webarena_bp.route('/webarena')
 def index():
-    # Only send a subset or light version of tasks to frontend to avoid heavy load
-    # For now, we send all but maybe we should paginate in the future
-    return render_template('webarena.html', tasks=WEBARENA_TASKS, browser_url=_BROWSER_URL, env_urls=DEFAULT_ENV_URLS)
+    return render_template('webarena.html', browser_url=_BROWSER_URL, env_urls=DEFAULT_ENV_URLS)
 
 @webarena_bp.route('/webarena/tasks')
 def get_tasks():
-    # API to fetch tasks if we move to client-side pagination
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 50))
     start = (page - 1) * per_page
@@ -49,23 +46,18 @@ def get_tasks():
     })
 
 def _resolve_start_url(task, env_urls_override=None):
-    """
-    Resolves the start URL for a task, replacing placeholders like __SHOPPING__
-    with the actual configured base URL.
-    """
     start_url = task.get('start_url', '')
     env_urls = DEFAULT_ENV_URLS.copy()
     if env_urls_override:
         env_urls.update(env_urls_override)
 
-    # Replacements based on WebArena conventions
     replacements = {
         "__SHOPPING__": env_urls.get("shopping"),
         "__SHOPPING_ADMIN__": env_urls.get("shopping_admin"),
         "__GITLAB__": env_urls.get("gitlab"),
         "__REDDIT__": env_urls.get("reddit"),
         "__MAP__": env_urls.get("map"),
-        "__WIKIPEDIA__": env_urls.get("wikipedia", "https://en.wikipedia.org/wiki"), # Default fallback
+        "__WIKIPEDIA__": env_urls.get("wikipedia", "https://en.wikipedia.org/wiki"),
     }
 
     for placeholder, base_url in replacements.items():
@@ -74,10 +66,9 @@ def _resolve_start_url(task, env_urls_override=None):
 
     return start_url
 
-def _evaluate_result(history, task):
+def _evaluate_result(history, task, controller):
     """
     Evaluation logic based on WebArena 'eval' fields.
-    Supports 'string_match' and 'url_match'.
     """
     if not task:
         return "Custom task - no automated evaluation"
@@ -87,6 +78,8 @@ def _evaluate_result(history, task):
     eval_types = eval_config.get('eval_types', [])
     reference_answers = eval_config.get('reference_answers', {})
 
+    results = []
+
     # 1. String Match
     if 'string_match' in eval_types:
         exact_match = reference_answers.get('exact_match')
@@ -95,36 +88,95 @@ def _evaluate_result(history, task):
 
         if exact_match:
             if final_result.strip() == exact_match.strip():
-                return "Success: Exact match found."
-            return f"Failure: Expected exact match '{exact_match}'."
+                results.append("Success: Exact match found.")
+            else:
+                results.append(f"Failure: Expected exact match '{exact_match}'.")
 
         if must_include:
             missing = [phrase for phrase in must_include if phrase.lower() not in final_result.lower()]
             if not missing:
-                return "Success: All required phrases found."
-            return f"Failure: Missing phrases: {', '.join(missing)}"
+                results.append("Success: All required phrases found.")
+            else:
+                results.append(f"Failure: Missing phrases: {', '.join(missing)}")
 
         if fuzzy_match:
              # Basic implementation: check if any fuzzy match string is present
-             # Real WebArena uses more complex logic (F1 score etc)
-             matches = [phrase for phrase in fuzzy_match if phrase.lower() in final_result.lower()]
-             if matches:
-                 return "Success: Fuzzy match found."
-             return f"Failure: No fuzzy match found for {fuzzy_match}"
+             if isinstance(fuzzy_match, list):
+                 found = any(phrase.lower() in final_result.lower() for phrase in fuzzy_match)
+                 match_str = ", ".join(fuzzy_match)
+             else:
+                 found = fuzzy_match.lower() in final_result.lower()
+                 match_str = fuzzy_match
 
-    # 2. URL Match (Checking final URL)
+             if found:
+                 results.append("Success: Fuzzy match found.")
+             else:
+                 results.append(f"Failure: No fuzzy match found for {match_str}")
+
+    # 2. URL Match
     if 'url_match' in eval_types:
-        # Note: We'd need the final URL from the browser state.
-        # Currently the 'history' object might not strictly expose the final URL in a structured way
-        # unless we parse the last message or agent state.
-        # Assuming we might not have it easily, we skip or do a best effort if it's in the text.
         reference_url = eval_config.get('reference_url')
-        if reference_url and reference_url in final_result:
-             return "Success: Reference URL found in output."
-        # If we can't check the actual browser URL, we warn.
-        return "Inconclusive: URL match required but cannot verify browser URL state directly."
+        if reference_url:
+            # Try to get the actual current URL from the browser
+            try:
+                current_url = controller.evaluate_in_browser("window.location.href")
+                if reference_url in current_url:
+                    results.append(f"Success: Current URL matches reference '{reference_url}'")
+                else:
+                     # Fallback to checking text output if browser check fails or doesn't match
+                    if reference_url in final_result:
+                        results.append(f"Success: Reference URL found in output text.")
+                    else:
+                        results.append(f"Failure: URL '{reference_url}' not found in current location ({current_url}) or output.")
+            except Exception as e:
+                results.append(f"Warning: Could not verify browser URL: {e}")
 
-    return "Evaluation type not fully supported or inconclusive."
+    # 3. Program HTML (DOM Check)
+    if 'program_html' in eval_types:
+        program_html = eval_config.get('program_html', [])
+        for check in program_html:
+            # We assume 'url' key might specify a page, but usually it checks the current page 'last'
+            locator_js = check.get('locator') # This is JS code to execute
+            required_contents = check.get('required_contents', {})
+
+            if locator_js:
+                try:
+                    # WebArena locators often use document.querySelector... which returns an element or string.
+                    # We need to execute this JS in the browser.
+                    # The locator string might be like "document.querySelector(...).outerText"
+
+                    # We wrap it to ensure it returns a value we can capture
+                    js_code = f"(() => {{ return {locator_js}; }})()"
+
+                    execution_result = controller.evaluate_in_browser(js_code)
+                    execution_result_str = str(execution_result) if execution_result is not None else ""
+
+                    # Check against required contents
+                    exact_match = required_contents.get('exact_match')
+                    must_include = required_contents.get('must_include')
+
+                    if exact_match:
+                        if execution_result_str.strip() == exact_match.strip():
+                             results.append(f"Success (DOM): Exact match for locator.")
+                        else:
+                             results.append(f"Failure (DOM): Expected '{exact_match}', got '{execution_result_str}'")
+
+                    if must_include:
+                        missing = [phrase for phrase in must_include if phrase.lower() not in execution_result_str.lower()]
+                        if not missing:
+                             results.append(f"Success (DOM): Required content found in locator result.")
+                        else:
+                             results.append(f"Failure (DOM): Missing content in DOM: {', '.join(missing)}")
+
+                except Exception as e:
+                    results.append(f"Failure (DOM): Error executing locator '{locator_js}': {e}")
+            else:
+                 results.append("Warning: program_html check missing locator")
+
+    if not results:
+        return "No automated evaluation criteria met or supported."
+
+    return "\n".join(results)
 
 @webarena_bp.route('/webarena/run', methods=['POST'])
 def run_task():
@@ -138,7 +190,6 @@ def run_task():
     current_task = None
 
     if task_id is not None:
-        # WebArena tasks in JSON use integer IDs, but we might receive string
         try:
             t_id = int(task_id)
             current_task = next((t for t in WEBARENA_TASKS if t.get('task_id') == t_id), None)
@@ -166,11 +217,6 @@ def run_task():
         if controller.is_running():
              return jsonify({'error': 'エージェントは既に実行中です。'}), 409
 
-        # We pass the prompt. The controller handles the browser loop.
-        # Note: WebArena often requires authentication (login).
-        # The 'require_login' field in task tells us this.
-        # Automating login is complex without credential injection.
-        # We assume the user might be logged in or the agent can handle it if creds are provided in prompt.
         if current_task and current_task.get('require_login'):
             full_prompt += " (Note: This task may require logging in. If credentials are unknown, fail gracefully.)"
 
@@ -179,13 +225,15 @@ def run_task():
 
         step_messages = _format_history_messages(history)
 
-        evaluation_msg = _evaluate_result(history, current_task)
+        # Pass controller to evaluation to run DOM checks
+        evaluation_msg = _evaluate_result(history, current_task, controller)
 
         success = history.is_successful()
-        if "Failure:" in evaluation_msg:
+        if "Failure" in evaluation_msg:
             success = False
-        elif "Success:" in evaluation_msg:
-            success = True
+        elif "Success" in evaluation_msg and not success:
+            # If agent didn't mark as success but eval passed, we might consider it success or partial
+             pass
 
         return jsonify({
             'success': success,
