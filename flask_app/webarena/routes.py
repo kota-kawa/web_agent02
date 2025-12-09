@@ -6,6 +6,7 @@ import os
 import re
 from flask_app.env_utils import _BROWSER_URL
 from flask_app.formatting import _format_history_messages
+from flask_app.webarena.evaluation import WebArenaEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ DEFAULT_ENV_URLS = {
     "gitlab": os.getenv("WEBARENA_GITLAB_URL", "http://gitlab:8023"),
     "reddit": os.getenv("WEBARENA_REDDIT_URL", "http://forum:80"),
     "map": os.getenv("WEBARENA_MAP_URL", "http://map:3000"),
-    "wikipedia": os.getenv("WEBARENA_WIKIPEDIA_URL", "http://wikipedia:80")
+    "wikipedia": os.getenv("WEBARENA_WIKIPEDIA_URL", "https://en.wikipedia.org/wiki")
 }
 
 @webarena_bp.route('/webarena')
@@ -57,7 +58,7 @@ def _resolve_start_url(task, env_urls_override=None):
         "__GITLAB__": env_urls.get("gitlab"),
         "__REDDIT__": env_urls.get("reddit"),
         "__MAP__": env_urls.get("map"),
-        "__WIKIPEDIA__": env_urls.get("wikipedia", "https://en.wikipedia.org/wiki"),
+        "__WIKIPEDIA__": env_urls.get("wikipedia"),
     }
 
     for placeholder, base_url in replacements.items():
@@ -65,118 +66,6 @@ def _resolve_start_url(task, env_urls_override=None):
             start_url = start_url.replace(placeholder, base_url)
 
     return start_url
-
-def _evaluate_result(history, task, controller):
-    """
-    Evaluation logic based on WebArena 'eval' fields.
-    """
-    if not task:
-        return "Custom task - no automated evaluation"
-
-    final_result = history.final_result() or ""
-    eval_config = task.get('eval', {})
-    eval_types = eval_config.get('eval_types', [])
-    reference_answers = eval_config.get('reference_answers', {})
-
-    results = []
-
-    # 1. String Match
-    if 'string_match' in eval_types:
-        exact_match = reference_answers.get('exact_match')
-        must_include = reference_answers.get('must_include')
-        fuzzy_match = reference_answers.get('fuzzy_match')
-
-        if exact_match:
-            if final_result.strip() == exact_match.strip():
-                results.append("Success: Exact match found.")
-            else:
-                results.append(f"Failure: Expected exact match '{exact_match}'.")
-
-        if must_include:
-            missing = [phrase for phrase in must_include if phrase.lower() not in final_result.lower()]
-            if not missing:
-                results.append("Success: All required phrases found.")
-            else:
-                results.append(f"Failure: Missing phrases: {', '.join(missing)}")
-
-        if fuzzy_match:
-             # Basic implementation: check if any fuzzy match string is present
-             if isinstance(fuzzy_match, list):
-                 found = any(phrase.lower() in final_result.lower() for phrase in fuzzy_match)
-                 match_str = ", ".join(fuzzy_match)
-             else:
-                 found = fuzzy_match.lower() in final_result.lower()
-                 match_str = fuzzy_match
-
-             if found:
-                 results.append("Success: Fuzzy match found.")
-             else:
-                 results.append(f"Failure: No fuzzy match found for {match_str}")
-
-    # 2. URL Match
-    if 'url_match' in eval_types:
-        reference_url = eval_config.get('reference_url')
-        if reference_url:
-            # Try to get the actual current URL from the browser
-            try:
-                current_url = controller.evaluate_in_browser("window.location.href")
-                if reference_url in current_url:
-                    results.append(f"Success: Current URL matches reference '{reference_url}'")
-                else:
-                     # Fallback to checking text output if browser check fails or doesn't match
-                    if reference_url in final_result:
-                        results.append(f"Success: Reference URL found in output text.")
-                    else:
-                        results.append(f"Failure: URL '{reference_url}' not found in current location ({current_url}) or output.")
-            except Exception as e:
-                results.append(f"Warning: Could not verify browser URL: {e}")
-
-    # 3. Program HTML (DOM Check)
-    if 'program_html' in eval_types:
-        program_html = eval_config.get('program_html', [])
-        for check in program_html:
-            # We assume 'url' key might specify a page, but usually it checks the current page 'last'
-            locator_js = check.get('locator') # This is JS code to execute
-            required_contents = check.get('required_contents', {})
-
-            if locator_js:
-                try:
-                    # WebArena locators often use document.querySelector... which returns an element or string.
-                    # We need to execute this JS in the browser.
-                    # The locator string might be like "document.querySelector(...).outerText"
-
-                    # We wrap it to ensure it returns a value we can capture
-                    js_code = f"(() => {{ return {locator_js}; }})()"
-
-                    execution_result = controller.evaluate_in_browser(js_code)
-                    execution_result_str = str(execution_result) if execution_result is not None else ""
-
-                    # Check against required contents
-                    exact_match = required_contents.get('exact_match')
-                    must_include = required_contents.get('must_include')
-
-                    if exact_match:
-                        if execution_result_str.strip() == exact_match.strip():
-                             results.append(f"Success (DOM): Exact match for locator.")
-                        else:
-                             results.append(f"Failure (DOM): Expected '{exact_match}', got '{execution_result_str}'")
-
-                    if must_include:
-                        missing = [phrase for phrase in must_include if phrase.lower() not in execution_result_str.lower()]
-                        if not missing:
-                             results.append(f"Success (DOM): Required content found in locator result.")
-                        else:
-                             results.append(f"Failure (DOM): Missing content in DOM: {', '.join(missing)}")
-
-                except Exception as e:
-                    results.append(f"Failure (DOM): Error executing locator '{locator_js}': {e}")
-            else:
-                 results.append("Warning: program_html check missing locator")
-
-    if not results:
-        return "No automated evaluation criteria met or supported."
-
-    return "\n".join(results)
 
 @webarena_bp.route('/webarena/run', methods=['POST'])
 def run_task():
@@ -235,14 +124,16 @@ def run_task():
 
         step_messages = _format_history_messages(history)
 
-        # Pass controller to evaluation to run DOM checks
-        evaluation_msg = _evaluate_result(history, current_task, controller)
+        # Evaluation
+        evaluator = WebArenaEvaluator(controller)
+        evaluation_msg = evaluator.evaluate(current_task, history, history.final_result() or "")
 
         success = history.is_successful()
         if "Failure" in evaluation_msg:
             success = False
         elif "Success" in evaluation_msg and not success:
-            # If agent didn't mark as success but eval passed, we might consider it success or partial
+             # Check if all criteria in evaluation were successes
+             # If evaluation says success but agent self-report says fail, we trust evaluation (ground truth)
              pass
 
         return jsonify({
