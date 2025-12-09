@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WebArena 評価 - ブラウザエージェント</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <style>
+        /* WebArena specific styles overriding or adding to style.css */
+        .eval-container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .eval-sidebar {
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            overflow-y: auto;
+        }
+        .eval-main {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+        .task-card {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .task-card:hover {
+            border-color: #adb5bd;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .task-card.active {
+            border-color: #228be6;
+            background-color: #e7f5ff;
+        }
+        .results-pane {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            background: #fff;
+            border-top: 1px solid #e9ecef;
+        }
+        .step-item {
+            border-bottom: 1px solid #f1f3f5;
+            padding: 0.5rem 0;
+        }
+        .step-number {
+            font-weight: bold;
+            color: #495057;
+        }
+    </style>
+  </head>
+  <body>
+    <div class="eval-container">
+        <aside class="eval-sidebar">
+            <header>
+                <h2>WebArena 評価</h2>
+                <a href="/" style="font-size: 0.9rem; color: #868e96;">← ホームに戻る</a>
+            </header>
+
+            <div class="model-selector-group">
+                <label for="model-selector" class="model-selector-label">評価モデル</label>
+                <select id="model-selector" name="model" style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ced4da;">
+                    <option>Loading...</option>
+                </select>
+            </div>
+
+            <div>
+                <h3>タスク選択</h3>
+                <div id="task-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    {% for task in tasks %}
+                    <div class="task-card" data-id="{{ task.id }}" data-intent="{{ task.intent }}" data-url="{{ task.start_url }}">
+                        <div style="font-weight: 500; font-size: 0.9rem;">Task ID: {{ task.id }}</div>
+                        <div style="font-size: 0.85rem; color: #495057; margin-top: 0.25rem;">{{ task.intent }}</div>
+                    </div>
+                    {% endfor %}
+
+                    <div class="task-card" id="custom-task-card">
+                        <div style="font-weight: 500; font-size: 0.9rem;">カスタムタスク</div>
+                        <div style="margin-top: 0.5rem;">
+                            <input type="text" id="custom-url" placeholder="開始URL (例: https://google.com)" style="width: 100%; margin-bottom: 0.5rem; font-size: 0.8rem;">
+                            <textarea id="custom-intent" placeholder="指示内容..." style="width: 100%; font-size: 0.8rem;" rows="3"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="run-eval-btn" class="control-button control-button--primary" style="width: 100%; justify-content: center;">
+                評価を実行
+            </button>
+            <div id="status-msg" style="font-size: 0.85rem; color: #868e96; min-height: 1.2em;"></div>
+        </aside>
+
+        <main class="eval-main">
+            <div style="height: 60%; border-bottom: 1px solid #dee2e6;">
+                 <iframe src="{{ browser_url }}" title="Remote Browser" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+            <div class="results-pane">
+                <h3>実行ログ</h3>
+                <div id="logs">
+                    <p style="color: #adb5bd;">タスクを実行するとここに結果が表示されます。</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const modelSelector = document.getElementById('model-selector');
+        const taskCards = document.querySelectorAll('.task-card:not(#custom-task-card)');
+        const customCard = document.getElementById('custom-task-card');
+        const runBtn = document.getElementById('run-eval-btn');
+        const logs = document.getElementById('logs');
+        const statusMsg = document.getElementById('status-msg');
+        let selectedTaskId = null;
+        let isCustom = false;
+
+        // Model Loading Logic (copied/adapted from index.html)
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+                modelSelector.innerHTML = '';
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = JSON.stringify({ provider: model.provider, model: model.model });
+                    option.textContent = model.label;
+                    if (data.current.provider === model.provider && data.current.model === model.model) {
+                        option.selected = true;
+                    }
+                    modelSelector.appendChild(option);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function applyModel(selection) {
+             await fetch('/model_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(selection),
+            });
+        }
+
+        modelSelector.addEventListener('change', async () => {
+            const selection = JSON.parse(modelSelector.value);
+            statusMsg.textContent = 'モデルを変更中...';
+            await applyModel(selection);
+            statusMsg.textContent = 'モデルを変更しました。';
+        });
+
+        // Task Selection
+        taskCards.forEach(card => {
+            card.addEventListener('click', () => {
+                document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
+                card.classList.add('active');
+                selectedTaskId = card.dataset.id;
+                isCustom = false;
+            });
+        });
+
+        customCard.addEventListener('click', () => {
+            document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
+            customCard.classList.add('active');
+            selectedTaskId = null;
+            isCustom = true;
+        });
+
+        // Run Evaluation
+        runBtn.addEventListener('click', async () => {
+            if (!selectedTaskId && !isCustom) {
+                alert('タスクを選択してください。');
+                return;
+            }
+
+            let payload = {};
+            if (isCustom) {
+                const intent = document.getElementById('custom-intent').value;
+                const startUrl = document.getElementById('custom-url').value;
+                if (!intent) {
+                    alert('カスタムタスクの指示を入力してください。');
+                    return;
+                }
+                payload = { custom_task: { intent, start_url: startUrl } };
+            } else {
+                payload = { task_id: selectedTaskId };
+            }
+
+            statusMsg.textContent = '評価実行中...';
+            statusMsg.style.color = '#228be6';
+            runBtn.disabled = true;
+            logs.innerHTML = '<div style="padding:1rem; color:#868e96;">実行中...</div>';
+
+            try {
+                const res = await fetch('/webarena/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Error running task');
+                }
+
+                logs.innerHTML = '';
+
+                // Summary
+                const summaryEl = document.createElement('div');
+                summaryEl.style.padding = '1rem';
+                summaryEl.style.background = data.success ? '#d3f9d8' : '#fff5f5';
+                summaryEl.style.marginBottom = '1rem';
+                summaryEl.innerHTML = `<strong>結果:</strong> ${data.success ? '成功 (判定)' : '終了/失敗'} <br> <strong>サマリー:</strong> ${data.summary}`;
+                logs.appendChild(summaryEl);
+
+                if (data.evaluation) {
+                    const evalEl = document.createElement('div');
+                    evalEl.style.padding = '1rem';
+                    evalEl.style.background = '#e3f2fd';
+                    evalEl.style.marginTop = '0.5rem';
+                    evalEl.innerHTML = `<strong>評価詳細:</strong> ${data.evaluation}`;
+                    logs.appendChild(evalEl);
+                }
+
+                // Steps
+                data.steps.forEach(step => {
+                    const div = document.createElement('div');
+                    div.className = 'step-item';
+                    div.innerHTML = `<span class="step-number">Step ${step.step}:</span> ${step.content}`;
+                    logs.appendChild(div);
+                });
+
+                statusMsg.textContent = '完了';
+                statusMsg.style.color = 'green';
+
+            } catch (e) {
+                logs.innerHTML = `<div style="color:red; padding:1rem;">エラーが発生しました: ${e.message}</div>`;
+                statusMsg.textContent = 'エラー';
+                statusMsg.style.color = 'red';
+            } finally {
+                runBtn.disabled = false;
+            }
+        });
+
+        loadModels();
+    </script>
+  </body>
+</html>

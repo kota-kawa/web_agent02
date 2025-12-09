@@ -27,9 +27,11 @@ from .history import (
 	_update_history_message,
 )
 from .models import SUPPORTED_MODELS
+from .webarena import webarena_bp
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
+app.register_blueprint(webarena_bp)
 
 _PLATFORM_BASE = os.getenv('MULTI_AGENT_PLATFORM_BASE', 'http://web:5050').rstrip('/')
 
