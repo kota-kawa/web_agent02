@@ -19,9 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir .
 
 # Copy flask application code
-COPY flask_app/ ./
+# Keep the flask_app package under the flask_app directory so imports like flask_app.* keep working.
+COPY flask_app/ flask_app/
 
-ENV FLASK_APP=app.py \
+ENV FLASK_APP=flask_app/app.py \
     FLASK_RUN_HOST=0.0.0.0 \
     FLASK_RUN_PORT=5005
 
