@@ -806,6 +806,33 @@ class BrowserAgentController:
 		with self._state_lock:
 			return self._initial_prompt_handled
 
+	def evaluate_in_browser(self, script: str) -> Any:
+		"""Execute JavaScript in the current browser session."""
+		if not self._browser_session:
+			raise AgentControllerError('ブラウザセッションが存在しません。')
+
+		async def _eval() -> Any:
+			try:
+				session = await self._ensure_browser_session()
+				# Ensure we have an active CDP session
+				cdp_session = await session.get_or_create_cdp_session()
+				result = await cdp_session.cdp_client.send.Runtime.evaluate(
+					params={'expression': script, 'returnByValue': True, 'awaitPromise': True},
+					session_id=cdp_session.session_id
+				)
+				if 'exceptionDetails' in result:
+					raise Exception(f"JS Evaluation failed: {result['exceptionDetails']}")
+				return result.get('result', {}).get('value')
+			except Exception as e:
+				self._logger.error(f'Failed to evaluate javascript: {e}')
+				raise
+
+		future = asyncio.run_coroutine_threadsafe(_eval(), self._loop)
+		try:
+			return future.result(timeout=10)
+		except Exception as exc:
+			raise AgentControllerError(f'JavaScriptの実行に失敗しました: {exc}') from exc
+
 	def mark_initial_prompt_handled(self) -> None:
 		with self._state_lock:
 			self._initial_prompt_handled = True

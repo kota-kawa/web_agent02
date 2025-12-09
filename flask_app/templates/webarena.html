@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WebArena 評価 - ブラウザエージェント</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <style>
+        /* WebArena specific styles overriding or adding to style.css */
+        .eval-container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .eval-sidebar {
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            overflow-y: auto;
+        }
+        .eval-main {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+        .task-card {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .task-card:hover {
+            border-color: #adb5bd;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .task-card.active {
+            border-color: #228be6;
+            background-color: #e7f5ff;
+        }
+        .results-pane {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            background: #fff;
+            border-top: 1px solid #e9ecef;
+        }
+        .step-item {
+            border-bottom: 1px solid #f1f3f5;
+            padding: 0.5rem 0;
+        }
+        .step-number {
+            font-weight: bold;
+            color: #495057;
+        }
+        .config-section {
+            background: #fff;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        .config-row {
+            margin-bottom: 0.5rem;
+        }
+        .config-row label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        .config-row input {
+            width: 100%;
+            padding: 0.25rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1rem;
+        }
+    </style>
+  </head>
+  <body>
+    <div class="eval-container">
+        <aside class="eval-sidebar">
+            <header>
+                <h2>WebArena 評価</h2>
+                <a href="/" style="font-size: 0.9rem; color: #868e96;">← ホームに戻る</a>
+            </header>
+
+            <div class="model-selector-group">
+                <label for="model-selector" class="model-selector-label">評価モデル</label>
+                <select id="model-selector" name="model" style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ced4da;">
+                    <option>Loading...</option>
+                </select>
+            </div>
+
+            <div class="config-section">
+                <h4 style="margin-top: 0;">環境設定 (Base URLs)</h4>
+                <div class="config-row">
+                    <label>Shopping</label>
+                    <input type="text" id="url-shopping" value="{{ env_urls.shopping }}">
+                </div>
+                <div class="config-row">
+                    <label>Admin</label>
+                    <input type="text" id="url-admin" value="{{ env_urls.shopping_admin }}">
+                </div>
+                <div class="config-row">
+                    <label>GitLab</label>
+                    <input type="text" id="url-gitlab" value="{{ env_urls.gitlab }}">
+                </div>
+                <div class="config-row">
+                    <label>Reddit</label>
+                    <input type="text" id="url-reddit" value="{{ env_urls.reddit }}">
+                </div>
+                <div class="config-row">
+                    <label>Map</label>
+                    <input type="text" id="url-map" value="{{ env_urls.map }}">
+                </div>
+            </div>
+
+            <div>
+                <h3>タスク選択</h3>
+                <div class="pagination">
+                    <button id="prev-page" disabled>Previous</button>
+                    <span id="page-indicator">Page 1</span>
+                    <button id="next-page">Next</button>
+                </div>
+                <div id="task-list" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                    <!-- Tasks will be loaded via JS -->
+                    <div class="task-card" id="custom-task-card">
+                        <div style="font-weight: 500; font-size: 0.9rem;">カスタムタスク</div>
+                        <div style="margin-top: 0.5rem;">
+                            <input type="text" id="custom-url" placeholder="開始URL (例: https://google.com)" style="width: 100%; margin-bottom: 0.5rem; font-size: 0.8rem;">
+                            <textarea id="custom-intent" placeholder="指示内容..." style="width: 100%; font-size: 0.8rem;" rows="3"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="run-eval-btn" class="control-button control-button--primary" style="width: 100%; justify-content: center;">
+                評価を実行
+            </button>
+            <div id="status-msg" style="font-size: 0.85rem; color: #868e96; min-height: 1.2em;"></div>
+        </aside>
+
+        <main class="eval-main">
+            <div style="height: 60%; border-bottom: 1px solid #dee2e6;">
+                 <iframe src="{{ browser_url }}" title="Remote Browser" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+            <div class="results-pane">
+                <h3>実行ログ</h3>
+                <div id="logs">
+                    <p style="color: #adb5bd;">タスクを実行するとここに結果が表示されます。</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const modelSelector = document.getElementById('model-selector');
+        const runBtn = document.getElementById('run-eval-btn');
+        const logs = document.getElementById('logs');
+        const statusMsg = document.getElementById('status-msg');
+        const taskListEl = document.getElementById('task-list');
+        const customCard = document.getElementById('custom-task-card');
+
+        let selectedTaskId = null;
+        let isCustom = false;
+        let currentPage = 1;
+        const perPage = 50;
+
+        // Load Models
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+                modelSelector.innerHTML = '';
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = JSON.stringify({ provider: model.provider, model: model.model });
+                    option.textContent = model.label;
+                    if (data.current.provider === model.provider && data.current.model === model.model) {
+                        option.selected = true;
+                    }
+                    modelSelector.appendChild(option);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function applyModel(selection) {
+             await fetch('/model_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(selection),
+            });
+        }
+
+        modelSelector.addEventListener('change', async () => {
+            const selection = JSON.parse(modelSelector.value);
+            statusMsg.textContent = 'モデルを変更中...';
+            await applyModel(selection);
+            statusMsg.textContent = 'モデルを変更しました。';
+        });
+
+        // Load Tasks
+        async function loadTasks(page) {
+            try {
+                const res = await fetch(`/webarena/tasks?page=${page}&per_page=${perPage}`);
+                const data = await res.json();
+
+                // Clear existing tasks except custom card
+                Array.from(taskListEl.children).forEach(child => {
+                    if (child.id !== 'custom-task-card') taskListEl.removeChild(child);
+                });
+
+                data.tasks.forEach(task => {
+                    const card = document.createElement('div');
+                    card.className = 'task-card';
+                    card.dataset.id = task.task_id;
+                    card.dataset.intent = task.intent;
+                    card.innerHTML = `
+                        <div style="font-weight: 500; font-size: 0.9rem;">Task ID: ${task.task_id}</div>
+                        <div style="font-size: 0.85rem; color: #495057; margin-top: 0.25rem;">${task.intent}</div>
+                    `;
+                    card.addEventListener('click', () => {
+                        document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
+                        card.classList.add('active');
+                        selectedTaskId = task.task_id;
+                        isCustom = false;
+                    });
+                    taskListEl.insertBefore(card, customCard);
+                });
+
+                document.getElementById('page-indicator').textContent = `Page ${data.page}`;
+                document.getElementById('prev-page').disabled = data.page <= 1;
+                document.getElementById('next-page').disabled = data.tasks.length < perPage; // Simple check
+
+            } catch (e) {
+                console.error("Failed to load tasks", e);
+            }
+        }
+
+        document.getElementById('prev-page').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                loadTasks(currentPage);
+            }
+        });
+
+        document.getElementById('next-page').addEventListener('click', () => {
+            currentPage++;
+            loadTasks(currentPage);
+        });
+
+        customCard.addEventListener('click', () => {
+            document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
+            customCard.classList.add('active');
+            selectedTaskId = null;
+            isCustom = true;
+        });
+
+        // Run Evaluation
+        runBtn.addEventListener('click', async () => {
+            if (selectedTaskId === null && !isCustom) {
+                alert('タスクを選択してください。');
+                return;
+            }
+
+            // Gather config URLs
+            const envUrls = {
+                shopping: document.getElementById('url-shopping').value,
+                shopping_admin: document.getElementById('url-admin').value,
+                gitlab: document.getElementById('url-gitlab').value,
+                reddit: document.getElementById('url-reddit').value,
+                map: document.getElementById('url-map').value,
+            };
+
+            let payload = { env_urls: envUrls };
+            if (isCustom) {
+                const intent = document.getElementById('custom-intent').value;
+                const startUrl = document.getElementById('custom-url').value;
+                if (!intent) {
+                    alert('カスタムタスクの指示を入力してください。');
+                    return;
+                }
+                payload.custom_task = { intent, start_url: startUrl };
+            } else {
+                payload.task_id = selectedTaskId;
+            }
+
+            statusMsg.textContent = '評価実行中...';
+            statusMsg.style.color = '#228be6';
+            runBtn.disabled = true;
+            logs.innerHTML = '<div style="padding:1rem; color:#868e96;">実行中...</div>';
+
+            try {
+                const res = await fetch('/webarena/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Error running task');
+                }
+
+                logs.innerHTML = '';
+
+                // Summary
+                const summaryEl = document.createElement('div');
+                summaryEl.style.padding = '1rem';
+                summaryEl.style.background = data.success ? '#d3f9d8' : '#fff5f5';
+                summaryEl.style.marginBottom = '1rem';
+                summaryEl.innerHTML = `<strong>結果:</strong> ${data.success ? '成功 (判定)' : '終了/失敗'} <br> <strong>サマリー:</strong> ${data.summary}`;
+                logs.appendChild(summaryEl);
+
+                if (data.evaluation) {
+                    const evalEl = document.createElement('div');
+                    evalEl.style.padding = '1rem';
+                    evalEl.style.background = '#e3f2fd';
+                    evalEl.style.marginTop = '0.5rem';
+                    evalEl.innerHTML = `<strong>評価詳細:</strong> ${data.evaluation}`;
+                    logs.appendChild(evalEl);
+                }
+
+                // Steps
+                data.steps.forEach(step => {
+                    const div = document.createElement('div');
+                    div.className = 'step-item';
+                    div.innerHTML = `<span class="step-number">Step ${step.step}:</span> ${step.content}`;
+                    logs.appendChild(div);
+                });
+
+                statusMsg.textContent = '完了';
+                statusMsg.style.color = 'green';
+
+            } catch (e) {
+                logs.innerHTML = `<div style="color:red; padding:1rem;">エラーが発生しました: ${e.message}</div>`;
+                statusMsg.textContent = 'エラー';
+                statusMsg.style.color = 'red';
+            } finally {
+                runBtn.disabled = false;
+            }
+        });
+
+        loadModels();
+        loadTasks(currentPage);
+    </script>
+  </body>
+</html>
