@@ -66,6 +66,32 @@
             font-weight: bold;
             color: #495057;
         }
+        .config-section {
+            background: #fff;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        .config-row {
+            margin-bottom: 0.5rem;
+        }
+        .config-row label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        .config-row input {
+            width: 100%;
+            padding: 0.25rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1rem;
+        }
     </style>
   </head>
   <body>
@@ -83,16 +109,39 @@
                 </select>
             </div>
 
+            <div class="config-section">
+                <h4 style="margin-top: 0;">環境設定 (Base URLs)</h4>
+                <div class="config-row">
+                    <label>Shopping</label>
+                    <input type="text" id="url-shopping" value="{{ env_urls.shopping }}">
+                </div>
+                <div class="config-row">
+                    <label>Admin</label>
+                    <input type="text" id="url-admin" value="{{ env_urls.shopping_admin }}">
+                </div>
+                <div class="config-row">
+                    <label>GitLab</label>
+                    <input type="text" id="url-gitlab" value="{{ env_urls.gitlab }}">
+                </div>
+                <div class="config-row">
+                    <label>Reddit</label>
+                    <input type="text" id="url-reddit" value="{{ env_urls.reddit }}">
+                </div>
+                <div class="config-row">
+                    <label>Map</label>
+                    <input type="text" id="url-map" value="{{ env_urls.map }}">
+                </div>
+            </div>
+
             <div>
                 <h3>タスク選択</h3>
-                <div id="task-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
-                    {% for task in tasks %}
-                    <div class="task-card" data-id="{{ task.id }}" data-intent="{{ task.intent }}" data-url="{{ task.start_url }}">
-                        <div style="font-weight: 500; font-size: 0.9rem;">Task ID: {{ task.id }}</div>
-                        <div style="font-size: 0.85rem; color: #495057; margin-top: 0.25rem;">{{ task.intent }}</div>
-                    </div>
-                    {% endfor %}
-
+                <div class="pagination">
+                    <button id="prev-page" disabled>Previous</button>
+                    <span id="page-indicator">Page 1</span>
+                    <button id="next-page">Next</button>
+                </div>
+                <div id="task-list" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                    <!-- Tasks will be loaded via JS -->
                     <div class="task-card" id="custom-task-card">
                         <div style="font-weight: 500; font-size: 0.9rem;">カスタムタスク</div>
                         <div style="margin-top: 0.5rem;">
@@ -124,15 +173,18 @@
 
     <script>
         const modelSelector = document.getElementById('model-selector');
-        const taskCards = document.querySelectorAll('.task-card:not(#custom-task-card)');
-        const customCard = document.getElementById('custom-task-card');
         const runBtn = document.getElementById('run-eval-btn');
         const logs = document.getElementById('logs');
         const statusMsg = document.getElementById('status-msg');
+        const taskListEl = document.getElementById('task-list');
+        const customCard = document.getElementById('custom-task-card');
+
         let selectedTaskId = null;
         let isCustom = false;
+        let currentPage = 1;
+        const perPage = 50;
 
-        // Model Loading Logic (copied/adapted from index.html)
+        // Load Models
         async function loadModels() {
             try {
                 const response = await fetch('/api/models');
@@ -167,14 +219,54 @@
             statusMsg.textContent = 'モデルを変更しました。';
         });
 
-        // Task Selection
-        taskCards.forEach(card => {
-            card.addEventListener('click', () => {
-                document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
-                card.classList.add('active');
-                selectedTaskId = card.dataset.id;
-                isCustom = false;
-            });
+        // Load Tasks
+        async function loadTasks(page) {
+            try {
+                const res = await fetch(`/webarena/tasks?page=${page}&per_page=${perPage}`);
+                const data = await res.json();
+
+                // Clear existing tasks except custom card
+                Array.from(taskListEl.children).forEach(child => {
+                    if (child.id !== 'custom-task-card') taskListEl.removeChild(child);
+                });
+
+                data.tasks.forEach(task => {
+                    const card = document.createElement('div');
+                    card.className = 'task-card';
+                    card.dataset.id = task.task_id;
+                    card.dataset.intent = task.intent;
+                    card.innerHTML = `
+                        <div style="font-weight: 500; font-size: 0.9rem;">Task ID: ${task.task_id}</div>
+                        <div style="font-size: 0.85rem; color: #495057; margin-top: 0.25rem;">${task.intent}</div>
+                    `;
+                    card.addEventListener('click', () => {
+                        document.querySelectorAll('.task-card').forEach(c => c.classList.remove('active'));
+                        card.classList.add('active');
+                        selectedTaskId = task.task_id;
+                        isCustom = false;
+                    });
+                    taskListEl.insertBefore(card, customCard);
+                });
+
+                document.getElementById('page-indicator').textContent = `Page ${data.page}`;
+                document.getElementById('prev-page').disabled = data.page <= 1;
+                document.getElementById('next-page').disabled = data.tasks.length < perPage; // Simple check
+
+            } catch (e) {
+                console.error("Failed to load tasks", e);
+            }
+        }
+
+        document.getElementById('prev-page').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                loadTasks(currentPage);
+            }
+        });
+
+        document.getElementById('next-page').addEventListener('click', () => {
+            currentPage++;
+            loadTasks(currentPage);
         });
 
         customCard.addEventListener('click', () => {
@@ -186,12 +278,21 @@
 
         // Run Evaluation
         runBtn.addEventListener('click', async () => {
-            if (!selectedTaskId && !isCustom) {
+            if (selectedTaskId === null && !isCustom) {
                 alert('タスクを選択してください。');
                 return;
             }
 
-            let payload = {};
+            // Gather config URLs
+            const envUrls = {
+                shopping: document.getElementById('url-shopping').value,
+                shopping_admin: document.getElementById('url-admin').value,
+                gitlab: document.getElementById('url-gitlab').value,
+                reddit: document.getElementById('url-reddit').value,
+                map: document.getElementById('url-map').value,
+            };
+
+            let payload = { env_urls: envUrls };
             if (isCustom) {
                 const intent = document.getElementById('custom-intent').value;
                 const startUrl = document.getElementById('custom-url').value;
@@ -199,9 +300,9 @@
                     alert('カスタムタスクの指示を入力してください。');
                     return;
                 }
-                payload = { custom_task: { intent, start_url: startUrl } };
+                payload.custom_task = { intent, start_url: startUrl };
             } else {
-                payload = { task_id: selectedTaskId };
+                payload.task_id = selectedTaskId;
             }
 
             statusMsg.textContent = '評価実行中...';
@@ -262,6 +363,7 @@
         });
 
         loadModels();
+        loadTasks(currentPage);
     </script>
   </body>
 </html>
