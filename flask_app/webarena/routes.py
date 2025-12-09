@@ -207,7 +207,17 @@ def run_task():
         return jsonify({'error': '有効なタスクではありません。'}), 400
 
     try:
-        from flask_app.app import _get_agent_controller
+        # Import here to avoid circular dependency
+        try:
+            from flask_app.app import _get_agent_controller
+        except ImportError:
+             # Fallback for testing where app might not be initialized as expected
+             from flask import current_app
+             if hasattr(current_app, '_get_agent_controller'):
+                 _get_agent_controller = current_app._get_agent_controller
+             else:
+                 raise
+
         controller = _get_agent_controller()
 
         full_prompt = intent
