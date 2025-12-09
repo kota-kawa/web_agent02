@@ -157,7 +157,7 @@ async def _retry_with_json_correction(
 2. 文字列内のダブルクォートは \\" でエスケープする
 3. 制御文字（タブ等）は適切にエスケープする
 4. JSONの構文（カンマ、括弧の対応）を確認する
-5. 説明やマークダウンは含めず、純粋なJSONのみを出力する"""
+5. 説明やマークダウンは含めず、純粋なJSONのみを出力する""",
 	)
 
 	retry_messages = messages + [correction_message]
@@ -203,9 +203,7 @@ async def _fallback_to_text_parsing(llm: Any, messages: list[Any]) -> dict[str, 
 
 		# If JSON extraction failed, try retry with correction prompt
 		if isinstance(response_text, str):
-			retry_result = await _retry_with_json_correction(
-				llm, messages, response_text, ValueError('JSON extraction failed')
-			)
+			retry_result = await _retry_with_json_correction(llm, messages, response_text, ValueError('JSON extraction failed'))
 			if retry_result:
 				return retry_result
 

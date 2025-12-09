@@ -511,7 +511,7 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 		if self.history and len(self.history[-1].result) > 0:
 			last_result = self.history[-1].result[-1]
 			if last_result.is_done is True:
-				return last_result.success
+				return last_result.success if last_result.success is not None else True
 		return None
 
 	def has_errors(self) -> bool:

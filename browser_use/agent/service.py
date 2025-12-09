@@ -1342,16 +1342,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				)
 				self.eventbus.dispatch(step_event)
 
-		# Increment step counter after step is fully completed
-		self.state.n_steps += 1
+		# Increment step counter only if the step was successful
+		if not (self.state.last_result and len(self.state.last_result) == 1 and self.state.last_result[-1].error):
+			self.state.n_steps += 1
 
 	async def _force_done_after_last_step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Handle special processing for the last step"""
 		if step_info and step_info.is_last_step():
 			# Add last step warning if needed
 			msg = 'Now comes your last step. Use only the "done" action now. No other actions - so here your action sequence must have length 1.'
-			msg += '\nIf the task is not yet fully finished as requested by the user, set success in "done" to false! E.g. if not all steps are fully completed.'
-			msg += '\nIf the task is fully finished, set success in "done" to true.'
+			msg += '\nIf you have found ANY useful information, set success in "done" to true, even if it is incomplete.'
+			msg += '\nOnly set success to false if you found absolutely nothing.'
 			msg += '\nInclude everything you found out for the ultimate task in the done text.'
 			self.logger.debug('Last step finishing up')
 			self._message_manager._add_context_message(UserMessage(content=msg))
@@ -1363,7 +1364,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if self.state.consecutive_failures >= self.settings.max_failures and self.settings.final_response_after_failure:
 			msg = f'You have failed {self.settings.max_failures} consecutive times. This is your final step to complete the task or provide what you found. '
 			msg += 'Use only the "done" action now. No other actions - so here your action sequence must have length 1.'
-			msg += '\nIf the task could not be completed due to the failures, set success in "done" to false!'
+			msg += '\nIf you have found ANY useful information, set success in "done" to true, even if it is incomplete.'
+			msg += '\nOnly set success to false if you found absolutely nothing.'
 			msg += '\nInclude everything you found out for the task in the done text.'
 
 			self.logger.debug('Force done action, because we reached max_failures.')

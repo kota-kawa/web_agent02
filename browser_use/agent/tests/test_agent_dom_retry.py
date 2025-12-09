@@ -1,5 +1,5 @@
 from browser_use.agent.service import Agent
-from browser_use.browser.views import BrowserStateSummary, PLACEHOLDER_4PX_SCREENSHOT
+from browser_use.browser.views import PLACEHOLDER_4PX_SCREENSHOT, BrowserStateSummary
 from browser_use.dom.views import SerializedDOMState
 
 
