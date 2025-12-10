@@ -1331,6 +1331,28 @@ button:not(:disabled) {
   cursor: default;
 }
 
+.wa-btn-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.wa-btn-chip:hover {
+  background: #e2e8f0;
+}
+
+.wa-btn-chip.active {
+  background: #0ea5e9;
+  color: white;
+  border-color: #0284c7;
+}
+
 /* Status Badges */
 .wa-badge {
   display: inline-flex;

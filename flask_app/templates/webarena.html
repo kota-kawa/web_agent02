@@ -55,12 +55,19 @@
                         <label>Reddit</label>
                         <input type="text" id="url-reddit" class="wa-input" value="{{ env_urls.reddit }}">
                     </div>
-                    <div class="wa-input-group">
-                        <label>Map</label>
-                        <input type="text" id="url-map" class="wa-input" value="{{ env_urls.map }}">
-                    </div>
                 </div>
             </details>
+
+            <!-- Site Filter -->
+            <div class="wa-section">
+                <h4 class="wa-section-title">環境で絞り込み</h4>
+                <div id="site-filters" style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="wa-btn-chip active" data-site="">ALL</button>
+                    {% for site in supported_sites %}
+                        <button class="wa-btn-chip" data-site="{{ site }}">{{ site.replace('_',' ')|title }}</button>
+                    {% endfor %}
+                </div>
+            </div>
 
             <!-- Task List -->
             <div class="wa-section" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
@@ -90,8 +97,11 @@
 
             <!-- Run Button -->
             <div style="padding-top: 10px;">
-                <button id="run-eval-btn" class="control-button control-button--primary" style="width: 100%; height: 48px; font-size: 1rem;">
-                    評価を実行
+                <button id="run-eval-btn" class="control-button control-button--primary" style="width: 100%; height: 46px; font-size: 1rem; margin-bottom: 8px;">
+                    選択タスクを実行
+                </button>
+                <button id="run-batch-btn" class="control-button" style="width: 100%; height: 42px; font-size: 0.95rem; border: 1px solid var(--border-subtle);">
+                    表示中タスクを順番に実行
                 </button>
                 <div id="status-msg" style="text-align: center; margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); min-height: 1.2em;"></div>
             </div>
@@ -122,6 +132,7 @@
     <script>
         const modelSelector = document.getElementById('model-selector');
         const runBtn = document.getElementById('run-eval-btn');
+        const runBatchBtn = document.getElementById('run-batch-btn');
         const logs = document.getElementById('logs');
         const statusMsg = document.getElementById('status-msg');
         const taskListEl = document.getElementById('task-list');
@@ -133,6 +144,8 @@
         let isCustom = false;
         let currentPage = 1;
         const perPage = 20; // Reduced for better UI fit
+        let cachedTasks = [];
+        let selectedSite = '';
 
         // Load Models
         async function loadModels() {
@@ -177,12 +190,15 @@
         async function loadTasks(page) {
             try {
                 taskListEl.innerHTML = '<div style="padding:10px; color:#94a3b8; text-align:center;">Loading...</div>';
-                const res = await fetch(`/webarena/tasks?page=${page}&per_page=${perPage}`);
+                const siteQuery = selectedSite ? `&site=${selectedSite}` : '';
+                const res = await fetch(`/webarena/tasks?page=${page}&per_page=${perPage}${siteQuery}`);
                 const data = await res.json();
 
                 taskListEl.innerHTML = '';
+                cachedTasks = [];
 
                 data.tasks.forEach(task => {
+                    cachedTasks.push(task);
                     const card = document.createElement('div');
                     card.className = 'wa-task-card';
                     card.dataset.id = task.task_id;
@@ -250,6 +266,21 @@
             selectTask('custom', customCard);
         });
 
+        // Site filter buttons
+        document.querySelectorAll('#site-filters .wa-btn-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#site-filters .wa-btn-chip').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedSite = btn.dataset.site || '';
+                currentPage = 1;
+                selectedTaskId = null;
+                isCustom = false;
+                customCard.classList.remove('active');
+                customInputs.style.display = 'none';
+                loadTasks(currentPage);
+            });
+        });
+
         // Run Evaluation
         runBtn.addEventListener('click', async () => {
             if (selectedTaskId === null && !isCustom) {
@@ -263,7 +294,6 @@
                 shopping_admin: document.getElementById('url-admin').value,
                 gitlab: document.getElementById('url-gitlab').value,
                 reddit: document.getElementById('url-reddit').value,
-                map: document.getElementById('url-map').value,
             };
 
             let payload = { env_urls: envUrls };
@@ -285,8 +315,8 @@
             runBtn.disabled = true;
             runBtn.innerHTML = '<span class="connection-indicator" data-state="connecting"><span class="dot"></span></span> 実行中...';
 
-            logs.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted);"><i>Running task... check browser view</i></div>';
-            resultBadge.style.display = 'none';
+                logs.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted);"><i>Running task... check browser view</i></div>';
+                resultBadge.style.display = 'none';
 
             try {
                 const res = await fetch('/webarena/run', {
@@ -343,6 +373,89 @@
             } finally {
                 runBtn.disabled = false;
                 runBtn.textContent = '評価を実行';
+            }
+        });
+
+        // Batch run supported tasks without prompt input
+        runBatchBtn.addEventListener('click', async () => {
+            // Gather config URLs
+            const envUrls = {
+                shopping: document.getElementById('url-shopping').value,
+                shopping_admin: document.getElementById('url-admin').value,
+                gitlab: document.getElementById('url-gitlab').value,
+                reddit: document.getElementById('url-reddit').value,
+            };
+
+            statusMsg.textContent = '一括実行中...';
+            statusMsg.style.color = 'var(--accent-info)';
+            runBtn.disabled = true;
+            runBatchBtn.disabled = true;
+            runBatchBtn.innerHTML = '<span class="connection-indicator" data-state=\"connecting\"><span class=\"dot\"></span></span> 一括実行中...';
+            logs.innerHTML = '<div style=\"padding:20px; text-align:center; color:var(--text-muted);\"><i>Running filtered batch... check browser view</i></div>';
+            resultBadge.style.display = 'none';
+
+            try {
+                // Fetch all tasks for current filter (one big page)
+                const siteQuery = selectedSite ? `&site=${selectedSite}` : '';
+                const taskRes = await fetch(`/webarena/tasks?page=1&per_page=1000${siteQuery}`);
+                const taskData = await taskRes.json();
+                const taskIds = (taskData.tasks || []).map(t => t.task_id);
+
+                if (!taskIds.length) {
+                    throw new Error('表示中のタスクがありません。');
+                }
+
+                const res = await fetch('/webarena/run_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ env_urls: envUrls, task_ids: taskIds })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Error running batch');
+
+                logs.innerHTML = '';
+
+                // Summary header
+                const summaryEl = document.createElement('div');
+                summaryEl.style.padding = '14px';
+                summaryEl.style.marginBottom = '14px';
+                summaryEl.style.borderRadius = '12px';
+                summaryEl.style.background = '#eff6ff';
+                summaryEl.style.border = '1px solid #bfdbfe';
+                summaryEl.innerHTML = `
+                    <div style=\"font-weight:700; color:#1d4ed8; margin-bottom:6px;\">バッチ結果</div>
+                    <div>成功: ${data.success_count} / ${data.total_tasks} | スコア: ${data.score}%</div>
+                `;
+                logs.appendChild(summaryEl);
+
+                data.results.forEach(result => {
+                    const card = document.createElement('div');
+                    card.className = 'wa-step';
+                    card.style.borderRadius = '10px';
+                    card.style.border = '1px solid var(--border-subtle)';
+                    card.style.padding = '10px';
+                    card.style.marginBottom = '10px';
+                    card.innerHTML = `
+                        <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;\">
+                            <div style=\"font-weight:700;\">TASK ${result.task_id}</div>
+                            <span class=\"wa-badge ${result.success ? 'wa-badge-success' : 'wa-badge-fail'}\">${result.success ? 'SUCCESS' : 'FAIL'}</span>
+                        </div>
+                        <div style=\"margin-bottom:6px;\"><strong>Summary:</strong> ${result.summary || ''}</div>
+                        ${result.evaluation ? `<div style=\"font-size:0.9em; color:var(--text-muted); white-space:pre-wrap;\">${result.evaluation}</div>` : ''}
+                    `;
+                    logs.appendChild(card);
+                });
+
+                statusMsg.textContent = '完了';
+                statusMsg.style.color = 'var(--accent-success)';
+            } catch (e) {
+                logs.innerHTML = `<div style=\"color:red; padding:20px;\">エラーが発生しました: ${e.message}</div>`;
+                statusMsg.textContent = 'エラー';
+                statusMsg.style.color = 'var(--accent-danger)';
+            } finally {
+                runBtn.disabled = false;
+                runBatchBtn.disabled = false;
+                runBatchBtn.textContent = '表示中タスクを順番に実行';
             }
         });
 

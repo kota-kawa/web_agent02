@@ -1,5 +1,13 @@
 # Implementation Summary: Conversation History Check Endpoint
 
+## WebArena Automation (Dec 2025)
+- Added WebArena batch runner to execute all locally available environments (Shopping / Shopping Admin / Reddit / GitLab) without manual prompt input (`flask_app/webarena/routes.py`, `flask_app/templates/webarena.html`).
+- Tasks are filtered server-side to only supported sites; a new `/webarena/run_batch` endpoint sequentially runs tasks and returns per-task results plus an aggregate score.
+- UI updates:
+  - Environment filter chips (Shopping / Shopping Admin / Reddit / GitLab) to show only relevant tasks.
+  - “表示中タスクを順番に実行” button runs the currently filtered task set sequentially.
+  - Removed MAP URL field since that environment is not used.
+
 ## Overview
 This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary. Conversation context handed to the LLM is trimmed to the very first user input plus the most recent five messages so prompts stay compact while preserving intent.
 

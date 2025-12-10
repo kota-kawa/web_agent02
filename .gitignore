@@ -116,6 +116,10 @@ private_example.py
 private_example
 CLAUDE.local.md
 
+# WebArena Data
+webarena_data/*.tar
+webarena_data/*.zim
+
 # uv (Package Manager)
 # Lock file is currently ignored. Uncomment to track versions for reproducibility (recommended for apps).
 uv.lock
