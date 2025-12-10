@@ -7,6 +7,7 @@
   - Environment filter chips (Shopping / Shopping Admin / Reddit / GitLab) to show only relevant tasks.
   - “表示中タスクを順番に実行” button runs the currently filtered task set sequentially.
   - Removed MAP URL field since that environment is not used.
+- Added per-task reset hook: before every WebArena task (single or batch) the browser session is reset and optional external reset hooks (`WEBARENA_RESET_COMMAND` or `WEBARENA_RESET_URL`) are invoked to restore backend state (cart, posts, etc.).
 
 ## Overview
 This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary. Conversation context handed to the LLM is trimmed to the very first user input plus the most recent five messages so prompts stay compact while preserving intent.

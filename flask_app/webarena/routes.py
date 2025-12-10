@@ -4,6 +4,9 @@ import logging
 import json
 import os
 import re
+import subprocess
+import urllib.request
+import urllib.error
 from flask_app.env_utils import _BROWSER_URL
 from flask_app.formatting import _format_history_messages
 
@@ -41,6 +44,10 @@ def _load_tasks():
 
 
 ALL_WEBARENA_TASKS, WEBARENA_TASKS = _load_tasks()
+
+# Optional external reset hooks
+RESET_COMMAND = os.getenv("WEBARENA_RESET_COMMAND")  # e.g., "docker compose -f bin/webarena/docker-compose.webarena.yml restart shopping shopping_admin gitlab forum"
+RESET_URL = os.getenv("WEBARENA_RESET_URL")  # e.g., "http://localhost:7000/reset"
 
 # Default base URLs for WebArena environments
 DEFAULT_ENV_URLS = {
@@ -100,6 +107,44 @@ def _resolve_start_url(task, env_urls_override=None):
     return start_url
 
 
+def _reset_state(controller, sites):
+    """
+    Best-effort reset for WebArena between tasks.
+    - Always reset the browser controller session (clears cookies/storage).
+    - Optionally call external reset hook via command or HTTP endpoint for backend state.
+    """
+    # 1) Reset browser session
+    try:
+        controller.reset()
+        controller.ensure_start_page_ready()
+    except Exception as e:
+        logger.warning("Browser reset failed: %s", e)
+
+    # 2) External reset hook (if configured)
+    sites_csv = ",".join(sites or [])
+
+    if RESET_URL:
+        try:
+            data = json.dumps({"sites": sites or []}).encode("utf-8")
+            req = urllib.request.Request(RESET_URL, data=data, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                logger.info("Reset URL responded with status %s", resp.getcode())
+        except Exception as e:
+            logger.warning("External reset via URL failed: %s", e)
+    elif RESET_COMMAND:
+        cmd = RESET_COMMAND.format(sites=sites_csv)
+        try:
+            subprocess.run(cmd, shell=True, check=True, timeout=300)
+            logger.info("Executed reset command: %s", cmd)
+        except Exception as e:
+            logger.warning("External reset command failed: %s", e)
+    else:
+        if sites:
+            logger.warning("No WEBARENA_RESET_COMMAND/URL configured. Only browser session was reset for sites: %s", sites_csv)
+        else:
+            logger.warning("No WEBARENA_RESET_COMMAND/URL configured. Only browser session was reset.")
+
+
 def _run_single_task(task, controller, env_urls_override=None):
     """
     Execute one WebArena task with the shared controller and return the result payload.
@@ -116,6 +161,8 @@ def _run_single_task(task, controller, env_urls_override=None):
 
     if task.get('require_login'):
         full_prompt += " (Note: This task may require logging in. If credentials are unknown, fail gracefully.)"
+
+    _reset_state(controller, task.get('sites') or [])
 
     result = controller.run(full_prompt)
     history = result.history
