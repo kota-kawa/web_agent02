@@ -14,14 +14,14 @@ services:
       - shopping_admin
       - forum
       - gitlab
-      - wikipedia
+
     environment:
       # Configure WebArena internal URLs
       - WEBARENA_SHOPPING_URL=http://shopping:80
       - WEBARENA_SHOPPING_ADMIN_URL=http://shopping_admin:80
       - WEBARENA_GITLAB_URL=http://gitlab:8023
       - WEBARENA_REDDIT_URL=http://forum:80
-      - WEBARENA_WIKIPEDIA_URL=http://wikipedia:80
+
 
   browser:
     extends:
@@ -78,16 +78,7 @@ services:
       - multi_agent_network
     command: /opt/gitlab/embedded/bin/runsvdir-start
 
-  wikipedia:
-    image: ghcr.io/kiwix/kiwix-serve:3.3.0
-    container_name: wikipedia
-    ports:
-      - "8888:80"
-    volumes:
-      - ./webarena_data:/data
-    command: wikipedia_en_all_maxi_2022-05.zim
-    networks:
-      - multi_agent_network
+
 
 networks:
   multi_agent_network:

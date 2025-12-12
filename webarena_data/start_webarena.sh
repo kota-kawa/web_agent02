@@ -10,7 +10,7 @@ echo "=== WebArena 環境構築・起動スクリプト ==="
 echo "作業ディレクトリ: $SCRIPT_DIR"
 
 # イメージファイルの定義 (ファイル名:イメージ名)
-# 注: WikipediaはDocker Hubからプルするためここには含めません
+
 declare -A IMAGES=(
     ["shopping_final_0712.tar"]="shopping_final_0712"
     ["shopping_admin_final_0719.tar"]="shopping_admin_final_0719"
@@ -93,4 +93,4 @@ echo " - Shopping: http://localhost:7770"
 echo " - Shopping Admin: http://localhost:7780"
 echo " - Forum (Reddit clone): http://localhost:9999"
 echo " - GitLab: http://localhost:8023"
-echo " - Wikipedia: http://localhost:8888"
+
