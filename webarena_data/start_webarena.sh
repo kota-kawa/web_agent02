@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# set -e # Removed to allow the script to continue even if some commands fail
 
 # スクリプトがあるディレクトリの絶対パスを取得
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -13,9 +13,9 @@ echo "作業ディレクトリ: $SCRIPT_DIR"
 
 declare -A IMAGES=(
     ["shopping_final_0712.tar"]="shopping_final_0712"
-    ["shopping_admin_final_0719.tar"]="shopping_admin_final_0719"
-    ["postmill-populated-exposed-withimg.tar"]="postmill-populated-exposed-withimg"
-    ["gitlab-populated-final-port8023.tar"]="gitlab-populated-final-port8023"
+    # ["shopping_admin_final_0719.tar"]="shopping_admin_final_0719"
+    # ["postmill-populated-exposed-withimg.tar"]="postmill-populated-exposed-withimg"
+    # ["gitlab-populated-final-port8023.tar"]="gitlab-populated-final-port8023"
 )
 
 # 1. Dockerイメージのロード
@@ -38,15 +38,22 @@ for file in "${!IMAGES[@]}"; do
              echo "   ⚠️ 別のターミナルで 'top' や 'docker system df' を実行して動作を確認できます。"
              if command -v pv > /dev/null 2>&1; then
                  echo "   (pv を使用して進捗を表示中...)"
-                 pv "$file_path" | docker load
+                 if pv "$file_path" | docker load; then
+                     echo "✔ ロード完了: $image_name"
+                 else
+                     echo "❌ エラー: ファイル '$file' からのイメージロードに失敗しました。"
+                 fi
              else
                  echo "   (pv がインストールされていないため、進捗は表示されません。インストールするには 'sudo apt install pv' または同等のコマンドを実行してください)"
-                 docker load -i "$file_path"
+                 if docker load -i "$file_path"; then
+                     echo "✔ ロード完了: $image_name"
+                 else
+                     echo "❌ エラー: ファイル '$file' からのイメージロードに失敗しました。"
+                 fi
              fi
-             echo "✔ ロード完了: $image_name"
         fi
     else
-        echo "⚠️ 警告: ファイル '$file' が見つかりません。イメージ '$image_name' が存在しない場合、起動に失敗する可能性があります。"
+        echo "⚠️ 警告: ファイル '$file' が見つかりません。このイメージはロードされません。"
     fi
 done
 
@@ -65,7 +72,7 @@ fi
 # 3. Docker Compose で起動
 echo ""
 echo "--- 3. WebArena サービスの起動 ---"
-COMPOSE_FILE="$PROJECT_ROOT/bin/webarena/docker-compose.webarena.yml"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.webarena.yml"
 
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo "❌ エラー: Docker Composeファイルが見つかりません: $COMPOSE_FILE"
@@ -87,10 +94,22 @@ fi
 docker compose -f "$COMPOSE_FILE" up -d
 
 echo ""
+echo "➤ Shoppingサービスの初期設定を行っています (30秒待機)..."
+sleep 30
+
+echo "   - Base URLの設定..."
+docker exec shopping /var/www/magento2/bin/magento setup:store-config:set --base-url='http://shopping/'
+
+echo "   - データベースの更新..."
+docker exec shopping mysql -u magentouser -pMyPassword magentodb -e 'UPDATE core_config_data SET value="http://shopping/" WHERE path = "web/secure/base_url";'
+
+echo "   - キャッシュのクリア..."
+docker exec shopping /var/www/magento2/bin/magento cache:flush
+
+echo ""
 echo "=== 完了しました ==="
 echo "各サービスへのアクセス:"
 echo " - Shopping: http://localhost:7770"
-echo " - Shopping Admin: http://localhost:7780"
-echo " - Forum (Reddit clone): http://localhost:9999"
-echo " - GitLab: http://localhost:8023"
-
+# echo " - Shopping Admin: http://localhost:7780"
+# echo " - Forum (Reddit clone): http://localhost:9999"
+# echo " - GitLab: http://localhost:8023"

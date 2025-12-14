@@ -77,16 +77,23 @@ def _load_custom_system_prompt_template() -> str | None:
 	return None
 
 
-def _build_custom_system_prompt(max_actions_per_step: int = _DEFAULT_MAX_ACTIONS_PER_STEP) -> str | None:
+def _build_custom_system_prompt(
+	max_actions_per_step: int = _DEFAULT_MAX_ACTIONS_PER_STEP,
+	force_disable_vision: bool = False,
+	provider: str | None = None,
+	model: str | None = None,
+) -> str | None:
 	template = _load_custom_system_prompt_template()
 	if not template:
 		return None
 
 	selection = _load_selection('browser')
-	provider = selection.get('provider', '')
-	model = selection.get('model', '')
+	provider = provider or selection.get('provider', '')
+	model = model or selection.get('model', '')
 
-	if _should_disable_vision(provider, model):
+	vision_disabled = force_disable_vision or _should_disable_vision(provider, model)
+
+	if vision_disabled:
 		# Remove vision-related sections for non-multimodal models
 		template = re.sub(r'<browser_vision>.*?</browser_vision>\n', '', template, flags=re.DOTALL)
 		# Adjust reasoning rules to remove dependency on screenshots

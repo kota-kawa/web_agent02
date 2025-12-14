@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # Main application (from parent docker-compose.yml)
   browser-agent:
@@ -11,16 +9,15 @@ services:
     depends_on:
       - browser
       - shopping
-      - shopping_admin
-      - forum
-      - gitlab
 
     environment:
+      # Disable model sync to the (absent) Multi-Agent-Platform "web" service to avoid NameResolutionError
+      - MULTI_AGENT_PLATFORM_BASE=
       # Configure WebArena internal URLs
       - WEBARENA_SHOPPING_URL=http://shopping:80
-      - WEBARENA_SHOPPING_ADMIN_URL=http://shopping_admin:80
-      - WEBARENA_GITLAB_URL=http://gitlab:8023
-      - WEBARENA_REDDIT_URL=http://forum:80
+      # - WEBARENA_SHOPPING_ADMIN_URL=http://shopping_admin:80
+      # - WEBARENA_GITLAB_URL=http://gitlab:8023
+      # - WEBARENA_REDDIT_URL=http://forum:80
 
 
   browser:
@@ -38,46 +35,6 @@ services:
       - "7770:80"
     networks:
       - multi_agent_network
-    command: >
-      bash -c "
-        /var/www/magento2/bin/magento setup:store-config:set --base-url='http://shopping:80/' &&
-        mysql -u magentouser -pMyPassword magentodb -e 'UPDATE core_config_data SET value=\"http://shopping:80/\" WHERE path = \"web/secure/base_url\";' &&
-        /var/www/magento2/bin/magento cache:flush &&
-        apache2-foreground
-      "
-
-  shopping_admin:
-    image: shopping_admin_final_0719
-    container_name: shopping_admin
-    ports:
-      - "7780:80"
-    networks:
-      - multi_agent_network
-    command: >
-      bash -c "
-        /var/www/magento2/bin/magento setup:store-config:set --base-url='http://shopping_admin:80/' &&
-        mysql -u magentouser -pMyPassword magentodb -e 'UPDATE core_config_data SET value=\"http://shopping_admin:80/\" WHERE path = \"web/secure/base_url\";' &&
-        /var/www/magento2/bin/magento cache:flush &&
-        apache2-foreground
-      "
-
-  forum:
-    image: postmill-populated-exposed-withimg
-    container_name: forum
-    ports:
-      - "9999:80"
-    networks:
-      - multi_agent_network
-
-  gitlab:
-    image: gitlab-populated-final-port8023
-    container_name: gitlab
-    ports:
-      - "8023:8023"
-    networks:
-      - multi_agent_network
-    command: /opt/gitlab/embedded/bin/runsvdir-start
-
 
 
 networks:

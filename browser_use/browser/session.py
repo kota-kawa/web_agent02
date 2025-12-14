@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from contextlib import suppress
 from functools import cached_property
 from pathlib import Path
@@ -15,6 +16,7 @@ from cdp_use.cdp.network import Cookie
 from cdp_use.cdp.target import AttachedToTargetEvent, SessionID, TargetID
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from uuid_extensions import uuid7str
+from websockets.exceptions import InvalidStatus
 
 # CDP logging is now handled by setup_logging() in logging_config.py
 # It automatically sets CDP logs to the same level as browser_use logs
@@ -37,6 +39,48 @@ from browser_use.browser.events import (
 	SwitchTabEvent,
 	TabClosedEvent,
 	TabCreatedEvent,
+)
+
+# Connection retry controls for CDP. By default we retry indefinitely with a short delay,
+# so long-running jobs keep trying to reconnect instead of failing early.
+_CDP_CONNECT_RETRY_DELAY = float(os.environ.get('BROWSER_USE_CDP_CONNECT_RETRY_DELAY', '5.0'))
+_CDP_CONNECT_MAX_RETRIES_RAW = os.environ.get('BROWSER_USE_CDP_CONNECT_MAX_RETRIES')
+_CDP_CONNECT_MAX_RETRIES: int | None
+try:
+	_CDP_CONNECT_MAX_RETRIES = int(_CDP_CONNECT_MAX_RETRIES_RAW) if _CDP_CONNECT_MAX_RETRIES_RAW else None
+	if _CDP_CONNECT_MAX_RETRIES is not None and _CDP_CONNECT_MAX_RETRIES <= 0:
+		_CDP_CONNECT_MAX_RETRIES = None
+except ValueError:
+	_CDP_CONNECT_MAX_RETRIES = None
+
+# Whether newly discovered targets (tabs) should use dedicated WebSocket connections by default.
+# Using a dedicated socket per target improves isolation but can exhaust DevTools proxies when many
+# tabs are opened in long-running batches. The default is now shared sockets for stability, and can
+# be overridden via environment variable when isolation is required.
+_CDP_DEDICATED_SOCKET_DEFAULT = os.environ.get('BROWSER_USE_DEDICATED_SOCKET_PER_TARGET', 'false').lower() in (
+	'1',
+	'true',
+	'yes',
+	'on',
+)
+# If a dedicated socket fails to open (often due to hub limits like \"Too many websocket connections\"),
+# automatically retry once with the shared root socket to keep the agent running.
+_CDP_NEW_SOCKET_FALLBACK = os.environ.get('BROWSER_USE_NEW_SOCKET_FALLBACK', 'true').lower() in (
+	'1',
+	'true',
+	'yes',
+	'on',
+)
+
+# Whether newly discovered targets (tabs) should use dedicated WebSocket connections by default.
+# Using a dedicated socket per target improves isolation but can exhaust DevTools proxies when many
+# tabs are opened in long-running batches. The default is now shared sockets for stability, and can
+# be overridden via environment variable when isolation is required.
+_CDP_DEDICATED_SOCKET_DEFAULT = os.environ.get('BROWSER_USE_DEDICATED_SOCKET_PER_TARGET', 'false').lower() in (
+	'1',
+	'true',
+	'yes',
+	'on',
 )
 from browser_use.browser.profile import BrowserProfile, ProxySettings, ViewportSize
 from browser_use.browser.views import BrowserStateSummary, TabInfo
@@ -431,6 +475,10 @@ class BrowserSession(BaseModel):
 				await session.disconnect()
 		self._cdp_session_pool.clear()
 
+		# Close the shared CDP client to avoid leaking WebSocket connections
+		if self._cdp_client_root:
+			with suppress(Exception):
+				await self._cdp_client_root.stop()
 		self._cdp_client_root = None  # type: ignore
 		self._cached_browser_state_summary = None
 		self._cached_selector_map.clear()
@@ -805,9 +853,12 @@ class BrowserSession(BaseModel):
 	async def on_CloseTabEvent(self, event: CloseTabEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
 
-		cdp_session = await self.get_or_create_cdp_session(target_id=None, focus=False)
+		# Use root client to close target to ensure we can close it even if we're not focused on it
+		# and to avoid using a session that we're about to close
+		if self._cdp_client_root:
+			await self._cdp_client_root.send.Target.closeTarget(params={'targetId': event.target_id})
+
 		await self.event_bus.dispatch(TabClosedEvent(target_id=event.target_id))
-		await cdp_session.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Handle tab creation - apply viewport settings to new tab."""
@@ -827,6 +878,14 @@ class BrowserSession(BaseModel):
 
 	async def on_TabClosedEvent(self, event: TabClosedEvent) -> None:
 		"""Handle tab closure - update focus if needed."""
+
+		# Cleanup the session if it exists to prevent WebSocket leaks
+		if event.target_id in self._cdp_session_pool:
+			session = self._cdp_session_pool.pop(event.target_id)
+			if hasattr(session, 'disconnect'):
+				await session.disconnect()
+			self.logger.debug(f'Disconnected CDP session for closed tab {event.target_id}')
+
 		if not self.agent_focus:
 			return
 
@@ -977,17 +1036,32 @@ class BrowserSession(BaseModel):
 			return self.agent_focus
 
 		# Create new session for this target
-		# Default to True for new sessions (each new target gets its own WebSocket)
-		should_use_new_socket = True if new_socket is None else new_socket
+		# Default now configurable: shared sockets by default to avoid hub limits; can opt-in to dedicated via flag/env.
+		should_use_new_socket = _CDP_DEDICATED_SOCKET_DEFAULT if new_socket is None else new_socket
 		self.logger.debug(
 			f'[get_or_create_cdp_session] Creating new CDP session for target {target_id} (new_socket={should_use_new_socket})'
 		)
-		session = await CDPSession.for_target(
-			self._cdp_client_root,
-			target_id,
-			new_socket=should_use_new_socket,
-			cdp_url=self.cdp_url if should_use_new_socket else None,
-		)
+		try:
+			session = await CDPSession.for_target(
+				self._cdp_client_root,
+				target_id,
+				new_socket=should_use_new_socket,
+				cdp_url=self.cdp_url if should_use_new_socket else None,
+			)
+		except Exception as e:
+			# If dedicated socket creation fails because the DevTools hub is throttling connections, retry with shared.
+			is_ws_limit = (
+				(isinstance(e, InvalidStatus) and getattr(e, 'status_code', None) in (400, 429))
+				or 'Too many websocket connections' in str(e)
+			)
+			if should_use_new_socket and _CDP_NEW_SOCKET_FALLBACK and is_ws_limit:
+				self.logger.warning(
+					'[get_or_create_cdp_session] Dedicated CDP socket rejected (%s). Retrying with shared socket to avoid exhaustion.',
+					e,
+				)
+				session = await CDPSession.for_target(self._cdp_client_root, target_id, new_socket=False)
+			else:
+				raise
 		self._cdp_session_pool[target_id] = session
 		# log length of _cdp_session_pool
 		self.logger.debug(f'[get_or_create_cdp_session] new _cdp_session_pool length: {len(self._cdp_session_pool)}')
@@ -1082,7 +1156,7 @@ class BrowserSession(BaseModel):
 					last_error = exc
 					continue
 
-			raise
+				raise
 
 		if last_error:
 			raise last_error
@@ -1253,122 +1327,148 @@ class BrowserSession(BaseModel):
 		browser_location = 'local browser' if self.is_local else 'remote browser'
 		self.logger.debug(f'🌎 Connecting to existing chromium-based browser via CDP: {self.cdp_url} -> ({browser_location})')
 
-		try:
-			# Import cdp-use client
-
-			# Convert HTTP URL to WebSocket URL if needed
-
-			# Create and store the CDP client for direct CDP communication
-			self._cdp_client_root = CDPClient(self.cdp_url)
-			assert self._cdp_client_root is not None
-			await self._cdp_client_root.start()
-			await self._cdp_client_root.send.Target.setAutoAttach(
-				params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}
-			)
-			self.logger.debug('CDP client connected successfully')
-
-			# Get browser targets to find available contexts/pages
-			targets = await self._cdp_client_root.send.Target.getTargets()
-
-			# Find main browser pages (avoiding iframes, workers, extensions, etc.)
-			page_targets: list[TargetInfo] = [
-				t
-				for t in targets['targetInfos']
-				if self._is_valid_target(
-					t, include_http=True, include_about=True, include_pages=True, include_iframes=False, include_workers=False
-				)
-			]
-
-			# Check for chrome://newtab pages and immediately redirect them
-			# to the default start page to avoid JS issues from CDP on chrome://* urls
-			# Collect all targets that need redirection
-			redirected_targets = []
-			redirect_sessions = {}  # Store sessions created for redirection to potentially reuse
-			for target in page_targets:
-				target_url = target.get('url', '')
-				if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
-					# Redirect chrome://newtab to the default start page to avoid JS issues preventing driving chrome://newtab
-					target_id = target['targetId']
-					self.logger.debug(f'🔄 Redirecting {target_url} to {DEFAULT_NEW_TAB_URL} for target {target_id}')
-					try:
-						# Create a CDP session for redirection (minimal domains to avoid duplicate event handlers)
-						# Only enable Page domain for navigation, avoid duplicate event handlers
-						redirect_session = await CDPSession.for_target(self._cdp_client_root, target_id, domains=['Page'])
-						# Navigate to about:blank
-						await redirect_session.cdp_client.send.Page.navigate(
-							params={'url': DEFAULT_NEW_TAB_URL}, session_id=redirect_session.session_id
-						)
-						redirected_targets.append(target_id)
-						redirect_sessions[target_id] = redirect_session  # Store for potential reuse
-						# Update the target's URL in our list for later use
-						target['url'] = DEFAULT_NEW_TAB_URL
-						# Small delay to ensure navigation completes
-						await asyncio.sleep(0.05)
-					except Exception as e:
-						self.logger.warning(f'Failed to redirect {target_url} to {DEFAULT_NEW_TAB_URL}: {e}')
-
-			# Log summary of redirections
-			if redirected_targets:
-				self.logger.debug(f'Redirected {len(redirected_targets)} chrome://newtab pages to {DEFAULT_NEW_TAB_URL}')
-
-			if not page_targets:
-				# No pages found, create a new one
-				new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': DEFAULT_NEW_TAB_URL})
-				target_id = new_target['targetId']
-				self.logger.debug(f'📄 Created new blank page with target ID: {target_id}')
-			else:
-				# Use the first available page
-				target_id = [page for page in page_targets if page.get('type') == 'page'][0]['targetId']
-				self.logger.debug(f'📄 Using existing page with target ID: {target_id}')
-
-			# Store the current page target ID and add to pool
-			# Reuse redirect session if available, otherwise create new one
-			if target_id in redirect_sessions:
-				self.logger.debug(f'Reusing redirect session for target {target_id}')
-				self.agent_focus = redirect_sessions[target_id]
-			else:
-				# For the initial connection, we'll use the shared root WebSocket
-				self.agent_focus = await CDPSession.for_target(self._cdp_client_root, target_id, new_socket=False)
-			if self.agent_focus:
-				self._cdp_session_pool[target_id] = self.agent_focus
-
-			await self._apply_initial_window_state(target_id)
-
-			# Enable proxy authentication handling if configured
-			await self._setup_proxy_auth()
-
-			# Verify the session is working
+		attempt = 0
+		while True:
+			attempt += 1
 			try:
-				if self.agent_focus:
-					assert self.agent_focus.title != 'Unknown title'
+				# Import cdp-use client
+
+				# Convert HTTP URL to WebSocket URL if needed
+
+				# Create and store the CDP client for direct CDP communication
+				self._cdp_client_root = CDPClient(self.cdp_url)
+				assert self._cdp_client_root is not None
+				await self._cdp_client_root.start()
+				await self._cdp_client_root.send.Target.setAutoAttach(
+					params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}
+				)
+				self.logger.debug('CDP client connected successfully')
+
+				# Get browser targets to find available contexts/pages
+				targets = await self._cdp_client_root.send.Target.getTargets()
+
+				# Find main browser pages (avoiding iframes, workers, extensions, etc.)
+				page_targets: list[TargetInfo] = [
+					t
+					for t in targets['targetInfos']
+					if self._is_valid_target(
+						t, include_http=True, include_about=True, include_pages=True, include_iframes=False, include_workers=False
+					)
+				]
+
+				# Check for chrome://newtab pages and immediately redirect them
+				# to the default start page to avoid JS issues from CDP on chrome://* urls
+				# Collect all targets that need redirection
+				redirected_targets = []
+				redirect_sessions = {}  # Store sessions created for redirection to potentially reuse
+				for target in page_targets:
+					target_url = target.get('url', '')
+					if is_new_tab_page(target_url) and not is_default_new_tab_url(target_url):
+						# Redirect chrome://newtab to the default start page to avoid JS issues preventing driving chrome://newtab
+						target_id = target['targetId']
+						self.logger.debug(f'🔄 Redirecting {target_url} to {DEFAULT_NEW_TAB_URL} for target {target_id}')
+						try:
+							# Create a CDP session for redirection (minimal domains to avoid duplicate event handlers)
+							# Only enable Page domain for navigation, avoid duplicate event handlers
+							redirect_session = await CDPSession.for_target(self._cdp_client_root, target_id, domains=['Page'])
+							# Navigate to about:blank
+							await redirect_session.cdp_client.send.Page.navigate(
+								params={'url': DEFAULT_NEW_TAB_URL}, session_id=redirect_session.session_id
+							)
+							redirected_targets.append(target_id)
+							redirect_sessions[target_id] = redirect_session  # Store for potential reuse
+							# Update the target's URL in our list for later use
+							target['url'] = DEFAULT_NEW_TAB_URL
+							# Small delay to ensure navigation completes
+							await asyncio.sleep(0.05)
+						except Exception as e:
+							self.logger.warning(f'Failed to redirect {target_url} to {DEFAULT_NEW_TAB_URL}: {e}')
+
+				# Log summary of redirections
+				if redirected_targets:
+					self.logger.debug(f'Redirected {len(redirected_targets)} chrome://newtab pages to {DEFAULT_NEW_TAB_URL}')
+
+				if not page_targets:
+					# No pages found, create a new one
+					new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': DEFAULT_NEW_TAB_URL})
+					target_id = new_target['targetId']
+					self.logger.debug(f'📄 Created new blank page with target ID: {target_id}')
 				else:
-					raise RuntimeError('Failed to create CDP session')
-			except Exception as e:
-				self.logger.warning(f'Failed to create CDP session: {e}')
+					# Use the first available page
+					target_id = [page for page in page_targets if page.get('type') == 'page'][0]['targetId']
+					self.logger.debug(f'📄 Using existing page with target ID: {target_id}')
+
+				# Store the current page target ID and add to pool
+				# Reuse redirect session if available, otherwise create new one
+				if target_id in redirect_sessions:
+					self.logger.debug(f'Reusing redirect session for target {target_id}')
+					self.agent_focus = redirect_sessions[target_id]
+				else:
+					# For the initial connection, we'll use the shared root WebSocket
+					self.agent_focus = await CDPSession.for_target(self._cdp_client_root, target_id, new_socket=False)
+				if self.agent_focus:
+					self._cdp_session_pool[target_id] = self.agent_focus
+
+				await self._apply_initial_window_state(target_id)
+
+				# (Re)start storage monitoring now that CDP is connected.
+				if getattr(self, '_storage_state_watchdog', None) is not None:
+					with suppress(Exception):
+						await self._storage_state_watchdog._start_monitoring()
+
+				# Enable proxy authentication handling if configured
+				await self._setup_proxy_auth()
+
+				# Verify the session is working
+				try:
+					if self.agent_focus:
+						assert self.agent_focus.title != 'Unknown title'
+					else:
+						raise RuntimeError('Failed to create CDP session')
+				except Exception as e:
+					self.logger.warning(f'Failed to create CDP session: {e}')
+					raise
+
+				# Dispatch TabCreatedEvent for all initial tabs (so watchdogs can initialize)
+				# This replaces the duplicated logic from navigation_watchdog's _initialize_agent_focus
+				for idx, target in enumerate(page_targets):
+					target_url = target.get('url', '')
+					self.logger.debug(f'Dispatching TabCreatedEvent for initial tab {idx}: {target_url}')
+					self.event_bus.dispatch(TabCreatedEvent(url=target_url, target_id=target['targetId']))
+
+				# Dispatch initial focus event
+				if page_targets:
+					initial_url = page_targets[0].get('url', '')
+					self.event_bus.dispatch(AgentFocusChangedEvent(target_id=page_targets[0]['targetId'], url=initial_url))
+					self.logger.debug(f'Initial agent focus set to tab 0: {initial_url}')
+
+				# Successful connection, break the retry loop
+				return self
+
+			except asyncio.CancelledError:
+				# Allow task cancellation to propagate immediately.
 				raise
+			except Exception as e:
+				# Keep retrying instead of failing hard; allow very long-lived sessions.
+				self.logger.warning(f'⚠️ Failed to setup CDP connection (attempt {attempt}): {e}')
+				# Clean up any partial state
+				with suppress(Exception):
+					if self._cdp_client_root:
+						await self._cdp_client_root.stop()
+				self._cdp_client_root = None
+				self.agent_focus = None
 
-			# Dispatch TabCreatedEvent for all initial tabs (so watchdogs can initialize)
-			# This replaces the duplicated logic from navigation_watchdog's _initialize_agent_focus
-			for idx, target in enumerate(page_targets):
-				target_url = target.get('url', '')
-				self.logger.debug(f'Dispatching TabCreatedEvent for initial tab {idx}: {target_url}')
-				self.event_bus.dispatch(TabCreatedEvent(url=target_url, target_id=target['targetId']))
+				if _CDP_CONNECT_MAX_RETRIES is not None and attempt >= _CDP_CONNECT_MAX_RETRIES:
+					self.logger.error('❌ Browser cannot continue without CDP connection after %s attempts', attempt)
+					raise RuntimeError(f'Failed to establish CDP connection to browser: {e}') from e
 
-			# Dispatch initial focus event
-			if page_targets:
-				initial_url = page_targets[0].get('url', '')
-				self.event_bus.dispatch(AgentFocusChangedEvent(target_id=page_targets[0]['targetId'], url=initial_url))
-				self.logger.debug(f'Initial agent focus set to tab 0: {initial_url}')
-
-		except Exception as e:
-			# Fatal error - browser is not usable without CDP connection
-			self.logger.error(f'❌ FATAL: Failed to setup CDP connection: {e}')
-			self.logger.error('❌ Browser cannot continue without CDP connection')
-			# Clean up any partial state
-			self._cdp_client_root = None
-			self.agent_focus = None
-			# Re-raise as a fatal error
-			raise RuntimeError(f'Failed to establish CDP connection to browser: {e}') from e
+				delay = max(_CDP_CONNECT_RETRY_DELAY * min(attempt, 10), 0.1)
+				# If the hub is rate-limiting (HTTP 400 / too many websockets), back off harder.
+				error_text = str(e).lower()
+				if 'too many websocket connections' in error_text or 'http 400' in error_text:
+					delay = max(delay, 60.0)
+				self.logger.info('🔁 Retrying CDP connection in %.1fs...', delay)
+				await asyncio.sleep(delay)
 
 		return self
 

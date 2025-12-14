@@ -1288,6 +1288,64 @@ button:not(:disabled) {
   color: #334155;
 }
 
+.wa-progress-card {
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 14px;
+  background: #f8fafc;
+  margin-bottom: 12px;
+}
+
+.wa-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #1e293b;
+}
+
+.wa-progress-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wa-progress-count {
+  color: #0f172a;
+}
+
+.wa-progress-bar {
+  width: 100%;
+  height: 10px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.wa-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+  border-radius: inherit;
+  transition: width 200ms ease;
+}
+
+.wa-progress-bar-fill.is-complete {
+  background: linear-gradient(90deg, #16a34a, #22c55e);
+}
+
+.wa-progress-bar-fill.is-error {
+  background: linear-gradient(90deg, #f43f5e, #ef4444);
+}
+
+.wa-progress-current {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
 .wa-step {
   padding: 8px 0;
   border-bottom: 1px solid #f1f5f9;
@@ -1296,6 +1354,39 @@ button:not(:disabled) {
 
 .wa-step:last-child {
   border-bottom: none;
+}
+
+.wa-task-result {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px -16px rgba(15, 23, 42, 0.4);
+}
+
+.wa-task-result__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wa-task-result__title {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.wa-task-result__summary {
+  color: #334155;
+}
+
+.wa-task-result__evaluation {
+  margin-top: 6px;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  white-space: pre-wrap;
 }
 
 .wa-step-num {
@@ -1368,6 +1459,85 @@ button:not(:disabled) {
 .wa-badge-success { background: #dcfce7; color: #15803d; }
 .wa-badge-fail { background: #fee2e2; color: #b91c1c; }
 .wa-badge-pending { background: #e0f2fe; color: #0369a1; }
+
+.wa-batch-summary {
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  box-shadow: 0 10px 28px -20px rgba(59, 130, 246, 0.35);
+}
+
+.wa-batch-summary__title {
+  font-weight: 700;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+
+.wa-batch-summary__stats {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.wa-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 24px -20px rgba(15, 23, 42, 0.35);
+}
+
+.wa-toggle input {
+  display: none;
+}
+
+.wa-toggle-slider {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  transition: background 0.2s ease;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.5);
+}
+
+.wa-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 6px 12px -6px rgba(15, 23, 42, 0.45);
+  transition: transform 0.2s ease;
+}
+
+.wa-toggle input:checked + .wa-toggle-slider {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.wa-toggle input:checked + .wa-toggle-slider::after {
+  transform: translateX(18px);
+}
+
+.wa-toggle-label {
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.wa-hint {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
 
 @media (max-width: 900px) {
   .wa-layout {

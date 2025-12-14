@@ -35,6 +35,20 @@
                 </div>
             </div>
 
+            <!-- Vision Toggle -->
+            <div class="wa-section">
+                <div class="wa-section-title" style="display:flex; align-items:center; gap:8px;">
+                    <span>スクリーンショット参照</span>
+                    <span id="vision-support-badge" class="wa-badge wa-badge-pending">CHECKING</span>
+                </div>
+                <label class="wa-toggle">
+                    <input type="checkbox" id="vision-toggle" checked />
+                    <span class="wa-toggle-slider" aria-hidden="true"></span>
+                    <span class="wa-toggle-label" id="vision-toggle-label">ON</span>
+                </label>
+                <p id="vision-hint" class="wa-hint">モデルがサポートしていればスクリーンショットを送信します。</p>
+            </div>
+
             <!-- Configuration Accordion -->
             <details class="wa-config-details">
                 <summary>環境設定 (Base URLs)</summary>
@@ -139,6 +153,10 @@
         const customCard = document.getElementById('custom-task-card');
         const customInputs = document.getElementById('custom-inputs');
         const resultBadge = document.getElementById('result-badge');
+        const visionToggle = document.getElementById('vision-toggle');
+        const visionToggleLabel = document.getElementById('vision-toggle-label');
+        const visionHint = document.getElementById('vision-hint');
+        const visionBadge = document.getElementById('vision-support-badge');
 
         let selectedTaskId = null;
         let isCustom = false;
@@ -146,6 +164,34 @@
         const perPage = 20; // Reduced for better UI fit
         let cachedTasks = [];
         let selectedSite = '';
+
+        async function refreshVisionState() {
+            try {
+                const res = await fetch('/api/vision');
+                const data = await res.json();
+                const supported = !!data.model_supported;
+                const effective = !!data.effective;
+                const userEnabled = !!data.user_enabled;
+
+                visionToggle.checked = userEnabled;
+                visionToggle.disabled = !supported;
+                visionToggleLabel.textContent = userEnabled ? 'ON' : 'OFF';
+
+                visionBadge.textContent = supported ? 'SUPPORTED' : 'UNSUPPORTED';
+                visionBadge.className = `wa-badge ${supported ? 'wa-badge-success' : 'wa-badge-fail'}`;
+
+                if (!supported) {
+                    visionHint.textContent = '選択中のモデルはスクリーンショット非対応です。GPT/Gemini/Claude 系のみ対応。';
+                } else if (effective) {
+                    visionHint.textContent = 'スクリーンショットをモデルに送信しています。';
+                } else {
+                    visionHint.textContent = 'スクリーンショット送信を停止中です。';
+                }
+            } catch (e) {
+                console.error('Failed to load vision state', e);
+                visionHint.textContent = 'スクリーンショット状態の取得に失敗しました。';
+            }
+        }
 
         // Load Models
         async function loadModels() {
@@ -184,6 +230,24 @@
             runBtn.disabled = false;
             statusMsg.textContent = 'モデルを変更しました。';
             setTimeout(() => { statusMsg.textContent = ''; }, 3000);
+            refreshVisionState();
+        });
+
+        visionToggle.addEventListener('change', async () => {
+            try {
+                visionToggle.disabled = true;
+                await fetch('/api/vision', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: visionToggle.checked }),
+                });
+            } catch (e) {
+                console.error('Failed to update vision toggle', e);
+                alert('スクリーンショット設定の更新に失敗しました。');
+            } finally {
+                visionToggle.disabled = false;
+                refreshVisionState();
+            }
         });
 
         // Load Tasks
@@ -308,6 +372,9 @@
             } else {
                 payload.task_id = selectedTaskId;
             }
+            if (selectedSite) {
+                payload.selected_site = selectedSite;
+            }
 
             // UI State: Running
             statusMsg.textContent = '評価を実行中...';
@@ -376,7 +443,60 @@
             }
         });
 
-        // Batch run supported tasks without prompt input
+        function buildBatchProgress(total) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'wa-progress-card';
+            wrapper.innerHTML = `
+                <div class="wa-progress-meta">
+                    <div class="wa-progress-label">一括実行中</div>
+                    <div class="wa-progress-count"><span data-progress-count>0</span> / ${total}</div>
+                </div>
+                <div class="wa-progress-bar"><div class="wa-progress-bar-fill" data-progress-bar></div></div>
+                <div class="wa-progress-current" data-progress-current>キューを準備しています...</div>
+            `;
+            const countEl = wrapper.querySelector('[data-progress-count]');
+            const barFill = wrapper.querySelector('[data-progress-bar]');
+            const currentEl = wrapper.querySelector('[data-progress-current]');
+            const labelEl = wrapper.querySelector('.wa-progress-label');
+
+            return {
+                element: wrapper,
+                update(currentIndex, totalCount, taskId) {
+                    countEl.textContent = `${currentIndex}`;
+                    const pct = Math.max(5, Math.round((currentIndex / totalCount) * 100));
+                    barFill.style.width = `${pct}%`;
+                    currentEl.textContent = taskId ? `TASK ${taskId} を実行中... (${currentIndex}/${totalCount})` : `実行中... (${currentIndex}/${totalCount})`;
+                },
+                finish(successCount, totalCount) {
+                    labelEl.textContent = '完了';
+                    barFill.style.width = '100%';
+                    barFill.classList.add('is-complete');
+                    currentEl.textContent = `成功 ${successCount} / ${totalCount} 件`;
+                },
+                error(message) {
+                    labelEl.textContent = 'エラー';
+                    currentEl.textContent = message;
+                    barFill.style.width = '100%';
+                    barFill.classList.add('is-error');
+                }
+            };
+        }
+
+        function appendTaskResultCard(result, index, total) {
+            const card = document.createElement('div');
+            card.className = 'wa-task-result';
+            card.innerHTML = `
+                <div class="wa-task-result__head">
+                    <div class="wa-task-result__title">(${index}/${total}) TASK ${result.task_id ?? ''}</div>
+                    <span class="wa-badge ${result.success ? 'wa-badge-success' : 'wa-badge-fail'}">${result.success ? 'SUCCESS' : 'FAIL'}</span>
+                </div>
+                <div class="wa-task-result__summary"><strong>Summary:</strong> ${result.summary || ''}</div>
+                ${result.evaluation ? `<div class="wa-task-result__evaluation">${result.evaluation.replace(/\n/g, '<br>')}</div>` : ''}
+            `;
+            logs.appendChild(card);
+        }
+
+        // Batch run supported tasks without prompt input (client-side sequential to show progress)
         runBatchBtn.addEventListener('click', async () => {
             // Gather config URLs
             const envUrls = {
@@ -390,66 +510,133 @@
             statusMsg.style.color = 'var(--accent-info)';
             runBtn.disabled = true;
             runBatchBtn.disabled = true;
-            runBatchBtn.innerHTML = '<span class="connection-indicator" data-state=\"connecting\"><span class=\"dot\"></span></span> 一括実行中...';
-            logs.innerHTML = '<div style=\"padding:20px; text-align:center; color:var(--text-muted);\"><i>Running filtered batch... check browser view</i></div>';
+            runBatchBtn.innerHTML = '<span class="connection-indicator" data-state="connecting"><span class="dot"></span></span> 一括実行中...';
+            logs.innerHTML = '';
             resultBadge.style.display = 'none';
 
+            let taskIds = [];
             try {
                 // Fetch all tasks for current filter (one big page)
                 const siteQuery = selectedSite ? `&site=${selectedSite}` : '';
                 const taskRes = await fetch(`/webarena/tasks?page=1&per_page=1000${siteQuery}`);
                 const taskData = await taskRes.json();
-                const taskIds = (taskData.tasks || []).map(t => t.task_id);
+                taskIds = (taskData.tasks || []).map(t => t.task_id);
+            } catch (err) {
+                logs.innerHTML = `<div style="color:red; padding:20px;">タスクの取得に失敗しました: ${err.message}</div>`;
+                statusMsg.textContent = 'エラー';
+                statusMsg.style.color = 'var(--accent-danger)';
+                runBtn.disabled = false;
+                runBatchBtn.disabled = false;
+                runBatchBtn.textContent = '表示中タスクを順番に実行';
+                return;
+            }
 
-                if (!taskIds.length) {
-                    throw new Error('表示中のタスクがありません。');
+            if (!taskIds.length) {
+                logs.innerHTML = '<div style="color:red; padding:20px;">表示中のタスクがありません。</div>';
+                statusMsg.textContent = 'エラー';
+                statusMsg.style.color = 'var(--accent-danger)';
+                runBtn.disabled = false;
+                runBatchBtn.disabled = false;
+                runBatchBtn.textContent = '表示中タスクを順番に実行';
+                return;
+            }
+
+            const progress = buildBatchProgress(taskIds.length);
+            logs.appendChild(progress.element);
+
+            const results = [];
+            let successCount = 0;
+            const startTime = Date.now();
+
+            try {
+                for (let i = 0; i < taskIds.length; i++) {
+                    const taskId = taskIds[i];
+                    progress.update(i + 1, taskIds.length, taskId);
+
+                    let data;
+                    try {
+                        const res = await fetch('/webarena/run', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                env_urls: envUrls,
+                                task_id: taskId,
+                                selected_site: selectedSite || undefined,
+                            })
+                        });
+                        data = await res.json();
+                        if (!res.ok) {
+                            data = {
+                                task_id: taskId,
+                                success: false,
+                                summary: data.error || `TASK ${taskId} の実行に失敗しました`,
+                                evaluation: 'Batch runner recorded an error for this task.',
+                                steps: [],
+                            };
+                        }
+                    } catch (err) {
+                        data = {
+                            task_id: taskId,
+                            success: false,
+                            summary: `エラー: ${err.message}`,
+                            evaluation: 'Batch runner caught an exception.',
+                            steps: [],
+                        };
+                    }
+
+                    results.push(data);
+                    if (data.success) successCount += 1;
+                    appendTaskResultCard(data, i + 1, taskIds.length);
                 }
 
-                const res = await fetch('/webarena/run_batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ env_urls: envUrls, task_ids: taskIds })
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Error running batch');
-
-                logs.innerHTML = '';
+                const endTime = Date.now();
+                const totalTimeMs = endTime - startTime;
+                const totalMinutes = Math.floor(totalTimeMs / 60000);
+                const totalSeconds = ((totalTimeMs % 60000) / 1000).toFixed(1);
+                const timeText = totalMinutes > 0 ? `${totalMinutes}分 ${totalSeconds}秒` : `${totalSeconds}秒`;
 
                 // Summary header
                 const summaryEl = document.createElement('div');
-                summaryEl.style.padding = '14px';
-                summaryEl.style.marginBottom = '14px';
-                summaryEl.style.borderRadius = '12px';
-                summaryEl.style.background = '#eff6ff';
-                summaryEl.style.border = '1px solid #bfdbfe';
+                summaryEl.className = 'wa-batch-summary';
+                const score = Math.round((successCount / taskIds.length) * 10000) / 100;
                 summaryEl.innerHTML = `
-                    <div style=\"font-weight:700; color:#1d4ed8; margin-bottom:6px;\">バッチ結果</div>
-                    <div>成功: ${data.success_count} / ${data.total_tasks} | スコア: ${data.score}%</div>
+                    <div class="wa-batch-summary__title">バッチ結果</div>
+                    <div class="wa-batch-summary__stats">
+                        成功: ${successCount} / ${taskIds.length} | スコア: ${score}%<br>
+                        所要時間: ${timeText}
+                    </div>
                 `;
-                logs.appendChild(summaryEl);
+                logs.insertBefore(summaryEl, progress.element);
 
-                data.results.forEach(result => {
-                    const card = document.createElement('div');
-                    card.className = 'wa-step';
-                    card.style.borderRadius = '10px';
-                    card.style.border = '1px solid var(--border-subtle)';
-                    card.style.padding = '10px';
-                    card.style.marginBottom = '10px';
-                    card.innerHTML = `
-                        <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;\">
-                            <div style=\"font-weight:700;\">TASK ${result.task_id}</div>
-                            <span class=\"wa-badge ${result.success ? 'wa-badge-success' : 'wa-badge-fail'}\">${result.success ? 'SUCCESS' : 'FAIL'}</span>
-                        </div>
-                        <div style=\"margin-bottom:6px;\"><strong>Summary:</strong> ${result.summary || ''}</div>
-                        ${result.evaluation ? `<div style=\"font-size:0.9em; color:var(--text-muted); white-space:pre-wrap;\">${result.evaluation}</div>` : ''}
-                    `;
-                    logs.appendChild(card);
-                });
+                progress.finish(successCount, taskIds.length);
 
-                statusMsg.textContent = '完了';
+                // Save results
+                try {
+                    statusMsg.textContent = '結果を保存中...';
+                    await fetch('/webarena/save_results', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ results: results })
+                    });
+                    statusMsg.textContent = '完了 (保存済み)';
+                } catch (e) {
+                    console.error('Save failed', e);
+                    statusMsg.textContent = '完了 (保存失敗)';
+                }
+
                 statusMsg.style.color = 'var(--accent-success)';
             } catch (e) {
-                logs.innerHTML = `<div style=\"color:red; padding:20px;\">エラーが発生しました: ${e.message}</div>`;
+                progress.error(e.message);
+                const errorCard = document.createElement('div');
+                errorCard.className = 'wa-task-result';
+                errorCard.innerHTML = `
+                    <div class="wa-task-result__head">
+                        <div class="wa-task-result__title">バッチを中断しました</div>
+                        <span class="wa-badge wa-badge-fail">ERROR</span>
+                    </div>
+                    <div class="wa-task-result__summary">${e.message}</div>
+                `;
+                logs.appendChild(errorCard);
                 statusMsg.textContent = 'エラー';
                 statusMsg.style.color = 'var(--accent-danger)';
             } finally {
@@ -462,6 +649,7 @@
         // Initialize
         loadModels();
         loadTasks(currentPage);
+        refreshVisionState();
     </script>
   </body>
 </html>

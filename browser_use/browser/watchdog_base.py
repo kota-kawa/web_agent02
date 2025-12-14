@@ -149,13 +149,13 @@ class BaseWatchdog(BaseModel):
 							)
 							del browser_session._cdp_session_pool[browser_session.agent_focus.target_id]
 							browser_session.agent_focus = await browser_session.get_or_create_cdp_session(
-								target_id=browser_session.agent_focus.target_id, new_socket=True
+								target_id=browser_session.agent_focus.target_id, new_socket=False
 							)
 							await browser_session.agent_focus.cdp_client.send.Target.activateTarget(
 								params={'targetId': browser_session.agent_focus.target_id}
 							)
 						else:
-							await browser_session.get_or_create_cdp_session(target_id=None, new_socket=True, focus=True)
+							await browser_session.get_or_create_cdp_session(target_id=None, new_socket=False, focus=True)
 					except Exception as sub_error:
 						if 'ConnectionClosedError' in str(type(sub_error)) or 'ConnectionError' in str(type(sub_error)):
 							browser_session.logger.error(

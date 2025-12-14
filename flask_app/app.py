@@ -27,6 +27,7 @@ from .history import (
 	_update_history_message,
 )
 from .models import SUPPORTED_MODELS
+from .system_prompt import _should_disable_vision
 from .webarena import webarena_bp
 
 app = Flask(__name__)
@@ -34,6 +35,28 @@ app.json.ensure_ascii = False
 app.register_blueprint(webarena_bp)
 
 _PLATFORM_BASE = os.getenv('MULTI_AGENT_PLATFORM_BASE', 'http://web:5050').rstrip('/')
+_VISION_SETTINGS_PATH = Path('local_vision_settings.json')
+
+
+def _load_vision_pref() -> bool:
+	try:
+		if _VISION_SETTINGS_PATH.exists():
+			data = json.loads(_VISION_SETTINGS_PATH.read_text(encoding='utf-8'))
+			if isinstance(data, dict) and 'enabled' in data:
+				return bool(data['enabled'])
+	except Exception:
+		logger.debug('Failed to load vision preference; defaulting to True', exc_info=True)
+	return True
+
+
+def _save_vision_pref(enabled: bool) -> None:
+	try:
+		_VISION_SETTINGS_PATH.write_text(json.dumps({'enabled': bool(enabled)}, ensure_ascii=False, indent=2), encoding='utf-8')
+	except Exception:
+		logger.debug('Failed to persist vision preference', exc_info=True)
+
+
+_VISION_PREF = _load_vision_pref()
 
 
 @app.route('/favicon.ico')
@@ -101,6 +124,10 @@ def _get_agent_controller() -> BrowserAgentController:
 				max_steps=_AGENT_MAX_STEPS,
 				cdp_cleanup=cleanup,
 			)
+			try:
+				_AGENT_CONTROLLER.set_vision_enabled(_VISION_PREF)
+			except Exception:
+				logger.debug('Failed to apply saved vision preference to controller', exc_info=True)
 		except Exception:
 			if cleanup:
 				with suppress(Exception):
@@ -153,6 +180,35 @@ def _notify_platform(selection: dict[str, Any]) -> None:
 		logger.info('Platform model sync skipped (%s)', exc)
 
 
+def _current_model_selection() -> dict[str, Any]:
+	"""Return current browser model selection with provider/model."""
+
+	try:
+		return apply_model_selection('browser')
+	except Exception:
+		logger.debug('Failed to load current model selection', exc_info=True)
+		return {'provider': '', 'model': ''}
+
+
+def _vision_state() -> dict[str, Any]:
+	"""Compute vision toggle state considering model capability."""
+
+	selection = _current_model_selection()
+	provider = (selection.get('provider') or '').strip().lower()
+	model = (selection.get('model') or '').strip().lower()
+
+	supported = not _should_disable_vision(provider, model)
+	effective = bool(_VISION_PREF and supported)
+
+	return {
+		'user_enabled': bool(_VISION_PREF),
+		'model_supported': supported,
+		'effective': effective,
+		'provider': provider,
+		'model': model,
+	}
+
+
 @app.route('/')
 def index() -> str:
 	try:
@@ -186,6 +242,36 @@ def get_models() -> ResponseReturnValue:
 			'current': {'provider': current['provider'], 'model': current['model'], 'base_url': current.get('base_url', '')},
 		}
 	)
+
+
+@app.get('/api/vision')
+def get_vision() -> ResponseReturnValue:
+	"""Return current vision (screenshot) preference and effective status."""
+
+	return jsonify(_vision_state())
+
+
+@app.post('/api/vision')
+def set_vision() -> ResponseReturnValue:
+	payload = request.get_json(silent=True) or {}
+	if not isinstance(payload, dict) or 'enabled' not in payload:
+		return jsonify({'error': 'enabled フラグを指定してください。'}), 400
+
+	enabled = bool(payload.get('enabled'))
+
+	global _VISION_PREF
+	_VISION_PREF = enabled
+	_save_vision_pref(enabled)
+
+	# Apply to running controller if present
+	if _AGENT_CONTROLLER is not None:
+		try:
+			_AGENT_CONTROLLER.set_vision_enabled(enabled)
+		except Exception as exc:
+			logger.debug('Failed to apply vision toggle to controller: %s', exc)
+
+	state = _vision_state()
+	return jsonify(state)
 
 
 @app.get('/api/stream')

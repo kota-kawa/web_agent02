@@ -800,8 +800,17 @@ You will be given a query and the markdown of a webpage that has been filtered t
 			event = browser_session.event_bus.dispatch(ScrollToTextEvent(text=text))
 
 			try:
-				# The handler returns None on success or raises an exception if text not found
-				await event.event_result(raise_if_any=True, raise_if_none=False)
+				# The handler returns True on success, False if not found
+				result = await event.event_result(raise_if_any=True, raise_if_none=False)
+
+				if result is False or (isinstance(result, dict) and not result.get('found', True)):
+					msg = f"Text '{text}' not found or not visible on page"
+					logger.info(msg)
+					return ActionResult(
+						extracted_content=msg,
+						long_term_memory=f"Tried scrolling to text '{text}' but it was not found",
+					)
+
 				memory = f'Scrolled to text: {text}'
 				msg = f'🔍  {memory}'
 				logger.info(msg)

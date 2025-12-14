@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   browser-agent:
     build:
@@ -24,8 +22,9 @@ services:
     shm_size: 2gb
     ports:
       - '4444:4444'
-      - '7900:7900'
+      - '7900:7901'
     environment:
+      - NO_VNC_PORT=7901
       - SE_VNC_NO_PASSWORD=1
       - SE_SCREEN_WIDTH=2560
       - SE_SCREEN_HEIGHT=1440
@@ -36,6 +35,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    extra_hosts:
+      - "localhost:host-gateway"
     networks:
       - default
       - multi_agent_network

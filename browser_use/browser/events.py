@@ -13,13 +13,13 @@ from browser_use.browser.views import BrowserStateSummary
 from browser_use.dom.views import EnhancedDOMTreeNode
 
 
-def _get_timeout(env_var: str, default: float) -> float | None:
+def _get_timeout(env_var: str, default: float | None) -> float | None:
 	"""
 	Safely parse environment variable timeout values with robust error handling.
 
 	Args:
 		env_var: Environment variable name (e.g. 'TIMEOUT_NavigateToUrlEvent')
-		default: Default timeout value as float (e.g. 15.0)
+		default: Default timeout value as float or None (e.g. 15.0, or None to disable)
 
 	Returns:
 		Parsed float value or the default if parsing fails
@@ -30,6 +30,9 @@ def _get_timeout(env_var: str, default: float) -> float | None:
 	# Try environment variable first
 	env_value = os.getenv(env_var)
 	if env_value:
+		lower = env_value.strip().lower()
+		if lower in {'none', 'no', 'off', 'false', '0', 'unlimited'}:
+			return None
 		try:
 			parsed = float(env_value)
 			if parsed < 0:
@@ -273,8 +276,8 @@ class SelectDropdownOptionEvent(ElementSelectedEvent[dict[str, str]]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_SelectDropdownOptionEvent', 8.0)  # seconds
 
 
-class ScrollToTextEvent(BaseEvent[None]):
-	"""Scroll to specific text on the page. Raises exception if text not found."""
+class ScrollToTextEvent(BaseEvent[bool]):
+	"""Scroll to specific text on the page. Returns True on success, False if not found."""
 
 	text: str
 	direction: Literal['up', 'down'] = 'down'
@@ -291,7 +294,8 @@ class BrowserStartEvent(BaseEvent):
 	cdp_url: str | None = None
 	launch_options: dict[str, Any] = Field(default_factory=dict)
 
-	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStartEvent', 30.0)  # seconds
+	# Disable timeout by default so long-running reconnects don't fail.
+	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStartEvent', None)  # seconds
 
 
 class BrowserStopEvent(BaseEvent):

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar, overload
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.exceptions import ModelProviderError
@@ -189,7 +189,7 @@ class ChatGoogle(BaseChatModel):
 			try:
 				parsed_content = self._parse_json_output(content_text, output_format)
 				return ChatInvokeCompletion(completion=parsed_content, usage=None)
-			except (json.JSONDecodeError, ValueError) as e:
+			except (json.JSONDecodeError, ValueError, ValidationError) as e:
 				# JSON parse error - attempt retry with corrective prompt
 				retry_result = await self._retry_json_parse(
 					gemini_messages, generation_config, system_instruction, content_text, output_format, e
@@ -323,8 +323,42 @@ class ChatGoogle(BaseChatModel):
 		last_error: Exception | None = None
 		for candidate in candidates:
 			try:
+				# If the candidate is JSON and missing required keys (e.g., LLM returned {"error": {...}}),
+				# coerce it into a minimal AgentOutput shape with a safe done action so the agent can continue.
+				try:
+					obj = json.loads(candidate)
+					if isinstance(obj, dict) and 'action' not in obj:
+						error_msg = None
+						if 'error' in obj:
+							err_val = obj['error']
+							if isinstance(err_val, dict):
+								error_msg = err_val.get('message') or err_val.get('detail') or str(err_val)
+							else:
+								error_msg = str(err_val)
+						elif 'message' in obj:
+							error_msg = str(obj.get('message'))
+
+						coerced = {
+							'evaluation_previous_goal': obj.get('evaluation_previous_goal') or '',
+							'memory': obj.get('memory') or '',
+							'next_goal': obj.get('next_goal') or '',
+							'current_status': obj.get('current_status') or '',
+							'action': [
+								{
+									'done': {
+										'text': error_msg or 'LLM returned an error payload; converted to done action',
+										'success': False,
+										'files_to_display': [],
+									}
+								}
+							],
+						}
+						candidate = json.dumps(coerced)
+				except Exception:
+					pass
+
 				return output_format.model_validate_json(candidate)
-			except (ValueError, json.JSONDecodeError) as e:
+			except (ValueError, json.JSONDecodeError, ValidationError) as e:
 				last_error = e
 				try:
 					return output_format.model_validate(json.loads(candidate))

@@ -11,10 +11,11 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from bubus import EventBus
 
-from .env_utils import _DEFAULT_START_URL, _env_int
+from .env_utils import _DEFAULT_START_URL, _env_int, _normalize_start_url
 from .exceptions import AgentControllerError
 from .formatting import _format_step_plan
 from .history import _append_history_message
@@ -37,6 +38,7 @@ except ModuleNotFoundError:
 	from browser_use import Agent, BrowserProfile, BrowserSession, Tools
 
 from browser_use.agent.views import AgentHistoryList, AgentOutput
+from browser_use.browser.events import TabClosedEvent
 from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.model_selection import _load_selection
@@ -78,6 +80,7 @@ class BrowserAgentController:
 		self._current_agent: Agent | None = None
 		self._is_running = False
 		self._paused = False
+		self._vision_enabled = True
 		self._step_message_ids: dict[int, int] = {}
 		self._step_message_lock = threading.Lock()
 		self._resume_url: str | None = None
@@ -89,6 +92,30 @@ class BrowserAgentController:
 	@property
 	def loop(self) -> asyncio.AbstractEventLoop:
 		return self._loop
+
+	@staticmethod
+	def _resolve_step_timeout() -> int | None:
+		"""Resolve step timeout from environment.
+
+		Returns:
+		    int | None: Timeout in seconds, or None/<=0 to disable.
+		"""
+
+		raw = os.environ.get('BROWSER_USE_STEP_TIMEOUT')
+		if raw is None:
+			# Default: disable step timeout to allow long-running tasks.
+			return None
+
+		raw = raw.strip().lower()
+		if raw in {'', 'none', 'no', 'off', 'false', '0'}:
+			return None
+
+		try:
+			value = int(raw)
+			return value if value > 0 else None
+		except ValueError:
+			# Fall back to no timeout on invalid input.
+			return None
 
 	def _run_loop(self) -> None:
 		asyncio.set_event_loop(self._loop)
@@ -156,9 +183,16 @@ class BrowserAgentController:
 			self._session_recreated = False
 		return recreated
 
-	async def _run_agent(self, task: str, record_history: bool = True) -> AgentRunResult:
+	async def _run_agent(
+		self,
+		task: str,
+		record_history: bool = True,
+		additional_system_message: str | None = None,
+		max_steps_override: int | None = None,
+	) -> AgentRunResult:
 		session = await self._ensure_browser_session()
 		session_recreated = self._consume_session_recreated()
+		effective_max_steps = max_steps_override if max_steps_override and max_steps_override > 0 else self._max_steps
 
 		step_message_ids: dict[int, int] = {}
 		starting_step_number = 1
@@ -192,7 +226,10 @@ class BrowserAgentController:
 			provider_from_llm = getattr(self._llm, 'provider', '') or provider
 			model_from_llm = str(getattr(self._llm, 'model', model) or model)
 
-			vision_disabled = _should_disable_vision(provider_from_llm, model_from_llm)
+			with self._state_lock:
+				vision_pref = self._vision_enabled
+
+			vision_disabled = (not vision_pref) or _should_disable_vision(provider_from_llm, model_from_llm)
 			if vision_disabled:
 				self._logger.info(
 					'Disabling vision because provider/model are not in the supported list: provider=%s model=%s',
@@ -200,9 +237,23 @@ class BrowserAgentController:
 					model_from_llm,
 				)
 
-			custom_system_prompt = _build_custom_system_prompt()
-			extend_system_message = None if custom_system_prompt else _LANGUAGE_EXTENSION
+			custom_system_prompt = _build_custom_system_prompt(
+				force_disable_vision=vision_disabled,
+				provider=provider_from_llm,
+				model=model_from_llm,
+			)
+			if custom_system_prompt:
+				if additional_system_message:
+					custom_system_prompt += f'\n\n{additional_system_message}'
+				extend_system_message = None
+			else:
+				base_extension = _LANGUAGE_EXTENSION
+				if additional_system_message:
+					base_extension += f'\n\n{additional_system_message}'
+				extend_system_message = base_extension
+
 			tools = Tools(exclude_actions=['read_file'])
+			step_timeout = self._resolve_step_timeout()
 			fresh_agent = Agent(
 				task=initial_task,
 				browser_session=session,
@@ -214,6 +265,7 @@ class BrowserAgentController:
 				extend_system_message=extend_system_message,
 				max_history_items=6,
 				use_vision=not vision_disabled,
+				step_timeout=step_timeout,
 			)
 			start_url = self._get_resume_url() or _DEFAULT_START_URL
 			if start_url and not fresh_agent.initial_actions:
@@ -278,7 +330,7 @@ class BrowserAgentController:
 			self._is_running = True
 			self._paused = False
 		try:
-			history = await agent.run(max_steps=self._max_steps)
+			history = await agent.run(max_steps=effective_max_steps)
 			self._update_resume_url_from_history(history)
 			new_entries = history.history[history_start_index:]
 			filtered_entries = [
@@ -589,6 +641,18 @@ class BrowserAgentController:
 		with self._state_lock:
 			self._resume_url = url
 
+	def set_start_page(self, url: str | None) -> None:
+		"""Override the next start/resume URL and reset warmup state."""
+
+		normalized = _normalize_start_url(url) if url else None
+		with self._state_lock:
+			self._resume_url = normalized
+			self._start_page_ready = False
+		if normalized:
+			self._logger.debug('Start page overridden for next run: %s', normalized)
+		else:
+			self._logger.debug('Start page override cleared; default will be used.')
+
 	def _get_resume_url(self) -> str | None:
 		with self._state_lock:
 			return self._resume_url
@@ -732,6 +796,50 @@ class BrowserAgentController:
 			if self._browser_session is not None:
 				self._start_page_ready = True
 
+	def close_additional_tabs(self, refresh_url: str | None = None) -> None:
+		"""
+		Close all open tabs except the current focus and optionally refresh that tab.
+
+		This is primarily used by the WebArena runner to guarantee that each task
+		starts from a single, freshly loaded page even if the previous task spawned
+		extra tabs.
+		"""
+
+		async def _close() -> None:
+			session = await self._ensure_browser_session()
+			# Enumerate tabs using the CDP helper for speed
+			try:
+				tabs = await session.get_tabs()
+			except Exception:
+				self._logger.debug('Failed to enumerate tabs before cleanup', exc_info=True)
+				return
+
+			current_target_id = session.agent_focus.target_id if session.agent_focus else None
+
+			for tab in tabs:
+				target_id = getattr(tab, 'target_id', None)
+				if not target_id:
+					continue
+				if current_target_id and target_id == current_target_id:
+					continue
+
+				with suppress(Exception):
+					await session._cdp_close_page(target_id)
+					await session.event_bus.dispatch(TabClosedEvent(target_id=target_id))
+
+			# If requested, reload the retained tab to ensure a fresh state
+			if refresh_url:
+				try:
+					await session.navigate_to(refresh_url, new_tab=False)
+				except Exception:
+					self._logger.debug('Failed to refresh start page after tab cleanup', exc_info=True)
+
+		future = asyncio.run_coroutine_threadsafe(_close(), self._loop)
+		try:
+			future.result(timeout=10)
+		except Exception:
+			self._logger.debug('Tab cleanup encountered an error', exc_info=True)
+
 	def update_llm(self) -> None:
 		"""Update the LLM instance based on current global settings."""
 		try:
@@ -774,6 +882,14 @@ class BrowserAgentController:
 		self._set_resume_url(None)
 		self._clear_step_message_ids()
 
+	def set_vision_enabled(self, enabled: bool) -> None:
+		with self._state_lock:
+			self._vision_enabled = bool(enabled)
+
+	def is_vision_enabled(self) -> bool:
+		with self._state_lock:
+			return self._vision_enabled
+
 	def prepare_for_new_task(self) -> None:
 		with self._state_lock:
 			if self._is_running:
@@ -784,13 +900,24 @@ class BrowserAgentController:
 			self._initial_prompt_handled = False
 		self._clear_step_message_ids()
 
-	def run(self, task: str, record_history: bool = True) -> AgentRunResult:
+	def run(
+		self,
+		task: str,
+		record_history: bool = True,
+		additional_system_message: str | None = None,
+		max_steps: int | None = None,
+	) -> AgentRunResult:
 		if self._shutdown:
 			raise AgentControllerError('エージェントコントローラーは停止済みです。')
 
 		with self._lock:
 			future = asyncio.run_coroutine_threadsafe(
-				self._run_agent(task, record_history=record_history),
+				self._run_agent(
+					task,
+					record_history=record_history,
+					additional_system_message=additional_system_message,
+					max_steps_override=max_steps,
+				),
 				self._loop,
 			)
 			with self._state_lock:
@@ -817,11 +944,10 @@ class BrowserAgentController:
 				# Ensure we have an active CDP session
 				cdp_session = await session.get_or_create_cdp_session()
 				result = await cdp_session.cdp_client.send.Runtime.evaluate(
-					params={'expression': script, 'returnByValue': True, 'awaitPromise': True},
-					session_id=cdp_session.session_id
+					params={'expression': script, 'returnByValue': True, 'awaitPromise': True}, session_id=cdp_session.session_id
 				)
 				if 'exceptionDetails' in result:
-					raise Exception(f"JS Evaluation failed: {result['exceptionDetails']}")
+					raise Exception(f'JS Evaluation failed: {result["exceptionDetails"]}')
 				return result.get('result', {}).get('value')
 			except Exception as e:
 				self._logger.error(f'Failed to evaluate javascript: {e}')

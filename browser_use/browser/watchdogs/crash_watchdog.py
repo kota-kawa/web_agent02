@@ -299,12 +299,12 @@ class CrashWatchdog(BaseWatchdog):
 				self.logger.debug(f'[CrashWatchdog] Checking browser health for target {self.browser_session.agent_focus}')
 				cdp_session = await self.browser_session.get_or_create_cdp_session()
 			except Exception as e:
-				self.logger.debug(
-					f'[CrashWatchdog] Checking browser health for target {self.browser_session.agent_focus} error: {type(e).__name__}: {e}'
-				)
-				self.agent_focus = cdp_session = await self.browser_session.get_or_create_cdp_session(
-					target_id=self.agent_focus.target_id, new_socket=True, focus=True
-				)
+					self.logger.debug(
+						f'[CrashWatchdog] Checking browser health for target {self.browser_session.agent_focus} error: {type(e).__name__}: {e}'
+					)
+					self.agent_focus = cdp_session = await self.browser_session.get_or_create_cdp_session(
+						target_id=self.agent_focus.target_id, new_socket=False, focus=True
+					)
 
 			for target in (await self.browser_session.cdp_client.send.Target.getTargets()).get('targetInfos', []):
 				if target.get('type') == 'page':

@@ -52,7 +52,8 @@ class AgentSettings(BaseModel):
 	calculate_cost: bool = False
 	include_tool_call_examples: bool = False
 	llm_timeout: int = 60  # Timeout in seconds for LLM calls
-	step_timeout: int = 180  # Timeout in seconds for each step
+	# Timeout in seconds for each step. Set to None to disable step-level timeouts entirely.
+	step_timeout: int | None = 120
 	final_response_after_failure: bool = True  # If True, attempt one final recovery call after max_failures
 
 

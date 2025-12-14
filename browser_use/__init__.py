@@ -1,3 +1,5 @@
+import inspect
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -20,7 +22,83 @@ if os.environ.get('BROWSER_USE_SETUP_LOGGING', 'true').lower() != 'false':
 else:
 	import logging
 
-	logger = logging.getLogger('browser_use')
+logger = logging.getLogger('browser_use')
+
+# Relax EventBus recursion guard for long nested handler chains (e.g., CloudSync)
+from bubus import EventBus
+from bubus.service import get_handler_id, get_handler_name, logger as eventbus_logger
+
+
+def _patch_eventbus_recursion_limits() -> None:
+	"""Allow deeper re-entrancy for safe handlers to avoid false loop errors.
+
+	The default bubus limit raises at depth>2 which breaks long event chains when
+	CloudSync listens to every event. We raise the ceiling (default 5) and skip
+	depth checks for known side-effect-only handlers.
+	"""
+
+	if getattr(EventBus, '_browser_use_recursion_patched', False):
+		return
+
+	max_depth = int(os.environ.get('BROWSER_USE_EVENTBUS_RECURSION_DEPTH', '5'))
+	warn_depth = max(1, max_depth - 1)
+	ignore_handlers = {'CloudSync.handle_event'}
+
+	def _patched_would_create_loop(self, event, handler):  # type: ignore[override]
+		assert inspect.isfunction(handler) or inspect.iscoroutinefunction(handler) or inspect.ismethod(handler), (
+			f'Handler {get_handler_name(handler)} must be a sync or async function, got: {type(handler)}'
+		)
+
+		# Forwarding loop check (unchanged)
+		if hasattr(handler, '__self__') and isinstance(handler.__self__, EventBus) and handler.__name__ == 'dispatch':
+			target_bus = handler.__self__
+			if target_bus.name in event.event_path:
+				eventbus_logger.debug(
+					f'⚠️ {self} handler {get_handler_name(handler)}#{str(id(handler))[-4:]}({event}) skipped to prevent infinite forwarding loop with {target_bus.name}'
+				)
+				return True
+
+		handler_id = get_handler_id(handler, self)
+		if handler_id in event.event_results:
+			existing_result = event.event_results[handler_id]
+			if existing_result.status in ('pending', 'started'):
+				eventbus_logger.debug(
+					f'⚠️ {self} handler {get_handler_name(handler)}#{str(id(handler))[-4:]}({event}) is already {existing_result.status} for event {event.event_id} (preventing recursive call)'
+				)
+				return True
+			elif existing_result.completed_at is not None:
+				eventbus_logger.debug(
+					f'⚠️ {self} handler {get_handler_name(handler)}#{str(id(handler))[-4:]}({event}) already completed @ {existing_result.completed_at} for event {event.event_id} (will not re-run)'
+				)
+				return True
+
+		is_forwarding_handler = (
+			inspect.ismethod(handler) and isinstance(handler.__self__, EventBus) and handler.__name__ == 'dispatch'
+		)
+
+		if not is_forwarding_handler:
+			handler_name = get_handler_name(handler)
+			if handler_name not in ignore_handlers:
+				recursion_depth = self._handler_dispatched_ancestor(event, handler_id)
+				if recursion_depth > max_depth:
+					raise RuntimeError(
+						f'Infinite loop detected: Handler {get_handler_name(handler)}#{str(id(handler))[-4:]} '
+						f'has recursively processed {recursion_depth} levels of events (max {max_depth}). '
+						f'Current event: {event}, Handler: {handler_id}'
+					)
+				elif recursion_depth >= warn_depth:
+					eventbus_logger.warning(
+						f'⚠️ {self} handler {get_handler_name(handler)}#{str(id(handler))[-4:]} '
+						f'at recursion depth {recursion_depth}/{max_depth} - deeper nesting will raise'
+					)
+
+		return False
+
+	EventBus._would_create_loop = _patched_would_create_loop  # type: ignore[assignment]
+	EventBus._browser_use_recursion_patched = True
+
+
+_patch_eventbus_recursion_limits()
 
 # Monkeypatch BaseSubprocessTransport.__del__ to handle closed event loops gracefully
 from asyncio import base_subprocess

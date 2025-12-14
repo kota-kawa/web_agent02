@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # Main application (from parent docker-compose.yml)
   browser-agent:

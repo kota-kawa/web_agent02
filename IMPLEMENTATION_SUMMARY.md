@@ -7,7 +7,10 @@
   - Environment filter chips (Shopping / Shopping Admin / Reddit / GitLab) to show only relevant tasks.
   - “表示中タスクを順番に実行” button runs the currently filtered task set sequentially.
   - Removed MAP URL field since that environment is not used.
+- Added a screenshot (vision) toggle to WebArena UI that defaults ON and is enforced server-side; only GPT/Gemini/Claude models can receive screenshots (`flask_app/app.py`, `flask_app/templates/webarena.html`, `flask_app/controller.py`, `flask_app/system_prompt.py`).
 - Added per-task reset hook: before every WebArena task (single or batch) the browser session is reset and optional external reset hooks (`WEBARENA_RESET_COMMAND` or `WEBARENA_RESET_URL`) are invoked to restore backend state (cart, posts, etc.).
+- Extra safety for consecutive runs: when moving to the next WebArena task the agent closes all previously opened tabs and reloads the configured start page so each task starts from a single, refreshed tab (`flask_app/controller.py`, `flask_app/webarena/routes.py`).
+- WebArena-only runs now cap the agent at 20 steps (configurable via `WEBARENA_AGENT_MAX_STEPS`, default 20) while the general UI/API still uses `AGENT_MAX_STEPS` (default 30).
 
 ## Overview
 This implementation adds a new endpoint `/api/check-conversation-history` that allows other agents to send conversation history for analysis. The endpoint uses LLM (Gemini) to determine if there are problems that can be solved with browser operations, and automatically executes browser tasks if needed. In addition, the first prompt of `/api/chat` and `/api/agent-relay` is now analyzed to optionally return a text-only reply when browser operations are unnecessary. Conversation context handed to the LLM is trimmed to the very first user input plus the most recent five messages so prompts stay compact while preserving intent.
@@ -16,6 +19,7 @@ This implementation adds a new endpoint `/api/check-conversation-history` that a
 - Browser agent tools now exclude the `read_file` action and the system prompt explicitly forbids it, preventing the LLM from generating or selecting `read_file` tasks (flask_app/controller.py, flask_app/system_prompt_browser_agent.md).
 - System prompt strengthens “act-first” guidance so the browser agent proceeds without unnecessary確認質問 when orchestrator-provided tasks are sufficiently clear, using reasonable defaults for general info gathering (flask_app/system_prompt_browser_agent.md).
 - System prompt now hard-requires the `action` field with at least one action (fallback to `wait` when unsure) to eliminate validation errors caused by responses that only contained `thinking` (flask_app/system_prompt_browser_agent.md).
+- CDP session strategy now defaults to shared sockets per Chrome instance to avoid DevTools hub limits during long WebArena batches. Dedicated per-tab sockets remain opt-in via `BROWSER_USE_DEDICATED_SOCKET_PER_TARGET=true`; failures to open a dedicated socket (HTTP 400 / “Too many websocket connections”) automatically fall back to the shared socket for resilience (browser_use/browser/session.py, crash_watchdog.py, watchdog_base.py).
 
 ## Problem Statement (Japanese)
 他のエージェントから、会話履歴が送信されてくる時がある。そのために、受け入れるためのエンドポイントを新規で作成してほしい。そして、その会話履歴を確認して、何か問題が発生していて、ブラウザ操作をして解決できそうな場合には、既存のロジックを使って、解決のために操作を実行してほしい。特に何もしなくてよさそうならば、何もしないようにしてほしい。つまり、会話履歴のチェック用のエンドポイントと、それに対するLLMがjsonを出力して、その出力をチェックして処理をするコードを書いてほしい。

@@ -193,7 +193,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		include_tool_call_examples: bool = False,
 		vision_detail_level: Literal['auto', 'low', 'high'] = 'auto',
 		llm_timeout: int = 90,
-		step_timeout: int = 120,
+		step_timeout: int | None = 120,
 		directly_open_url: bool = True,
 		include_recent_events: bool = False,
 		sample_images: list[ContentPartTextParam | ContentPartImageParam] | None = None,
@@ -2014,14 +2014,23 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				step_info = AgentStepInfo(step_number=step, max_steps=max_steps)
 
 				try:
-					await asyncio.wait_for(
-						self.step(step_info),
-						timeout=self.settings.step_timeout,
-					)
+					# When step_timeout is None or <=0, allow the step to run indefinitely.
+					if not self.settings.step_timeout or self.settings.step_timeout <= 0:
+						await self.step(step_info)
+					else:
+						await asyncio.wait_for(
+							self.step(step_info),
+							timeout=self.settings.step_timeout,
+						)
 					self.logger.debug(f'✅ Completed step {step + 1}/{max_steps}')
 				except TimeoutError:
 					# Handle step timeout gracefully
-					error_msg = f'Step {step + 1} timed out after {self.settings.step_timeout} seconds'
+					timeout_seconds = self.settings.step_timeout
+					error_msg = (
+						f'Step {step + 1} timed out after {timeout_seconds} seconds'
+						if timeout_seconds
+						else f'Step {step + 1} timed out'
+					)
 					self.logger.error(f'⏰ {error_msg}')
 					self.state.consecutive_failures += 1
 					self.state.last_result = [ActionResult(error=error_msg)]

@@ -1604,8 +1604,11 @@ class DefaultActionWatchdog(BaseWatchdog):
 		except Exception as e:
 			raise
 
-	async def on_ScrollToTextEvent(self, event: ScrollToTextEvent) -> None:
-		"""Handle scroll to text request with CDP. Raises exception if text not found."""
+	async def on_ScrollToTextEvent(self, event: ScrollToTextEvent) -> bool:
+		"""Handle scroll to text request with CDP.
+
+		Returns True when the text is located and scrolled into view, or False if it
+		could not be found. We avoid raising to keep the agent flow resilient."""
 
 		# TODO: handle looking for text inside cross-origin iframes as well
 
@@ -1660,44 +1663,42 @@ class DefaultActionWatchdog(BaseWatchdog):
 				self.logger.debug(f'Search query failed: {query}, error: {e}')
 				continue
 
-		if not found:
-			# Fallback: Try JavaScript search
-			js_result = await cdp_client.send.Runtime.evaluate(
-				params={
-					'expression': f'''
-							(() => {{
-								const walker = document.createTreeWalker(
-									document.body,
-									NodeFilter.SHOW_TEXT,
-									null,
-									false
-								);
-								let node;
-								while (node = walker.nextNode()) {{
-									if (node.textContent.includes("{event.text}")) {{
-										node.parentElement.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-										return true;
-									}}
-								}}
-								return false;
-							}})()
-						'''
-				},
-				session_id=session_id,
-			)
+
+		# Short-circuit if the DOM search succeeded
+		if found:
+			return True
+
+		# Fallback: Try JavaScript search
+		js_result = await cdp_client.send.Runtime.evaluate(
+			params={
+				'expression': f'''
+					(() => {{
+						const walker = document.createTreeWalker(
+							document.body,
+							NodeFilter.SHOW_TEXT,
+							null,
+							false
+						);
+						let node;
+						while (node = walker.nextNode()) {{
+							if (node.textContent.includes("{event.text}")) {{
+								node.parentElement.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+								return true;
+							}}
+						}}
+						return false;
+					}})()
+				'''
+			},
+			session_id=session_id,
+		)
 
 		if js_result.get('result', {}).get('value'):
 			self.logger.debug(f'📜 Scrolled to text: "{event.text}" (via JS)')
-			return None
-		else:
-			self.logger.warning(f'⚠️ Text not found: "{event.text}"')
-			raise BrowserError(f'Text not found: "{event.text}"', details={'text': event.text})
+			return True
 
-		# If we got here and found is True, return None (success)
-		if found:
-			return None
-		else:
-			raise BrowserError(f'Text not found: "{event.text}"', details={'text': event.text})
+		self.logger.warning(f'⚠️ Text not found: "{event.text}"')
+		return False
 
 	async def on_GetDropdownOptionsEvent(self, event: GetDropdownOptionsEvent) -> dict[str, str]:
 		"""Handle get dropdown options request with CDP."""
