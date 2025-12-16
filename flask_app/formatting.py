@@ -172,6 +172,8 @@ def _summarize_history(history: AgentHistoryList) -> str:
 	final_text = history.final_result()
 	if final_text:
 		lines.append('最終報告: ' + _compact_text(final_text))
+	elif success is True:
+		lines.append('最終報告: (詳細な結果テキストはありません)')
 
 	if history.history:
 		last_state = history.history[-1].state

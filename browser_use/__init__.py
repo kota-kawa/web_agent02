@@ -26,7 +26,8 @@ logger = logging.getLogger('browser_use')
 
 # Relax EventBus recursion guard for long nested handler chains (e.g., CloudSync)
 from bubus import EventBus
-from bubus.service import get_handler_id, get_handler_name, logger as eventbus_logger
+from bubus.service import get_handler_id, get_handler_name
+from bubus.service import logger as eventbus_logger
 
 
 def _patch_eventbus_recursion_limits() -> None:

@@ -1051,9 +1051,8 @@ class BrowserSession(BaseModel):
 		except Exception as e:
 			# If dedicated socket creation fails because the DevTools hub is throttling connections, retry with shared.
 			is_ws_limit = (
-				(isinstance(e, InvalidStatus) and getattr(e, 'status_code', None) in (400, 429))
-				or 'Too many websocket connections' in str(e)
-			)
+				isinstance(e, InvalidStatus) and getattr(e, 'status_code', None) in (400, 429)
+			) or 'Too many websocket connections' in str(e)
 			if should_use_new_socket and _CDP_NEW_SOCKET_FALLBACK and is_ws_limit:
 				self.logger.warning(
 					'[get_or_create_cdp_session] Dedicated CDP socket rejected (%s). Retrying with shared socket to avoid exhaustion.',

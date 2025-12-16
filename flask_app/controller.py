@@ -906,7 +906,9 @@ class BrowserAgentController:
 		record_history: bool = True,
 		additional_system_message: str | None = None,
 		max_steps: int | None = None,
-	) -> AgentRunResult:
+		background: bool = False,
+		completion_callback: Callable[[AgentRunResult | Exception], None] | None = None,
+	) -> AgentRunResult | None:
 		if self._shutdown:
 			raise AgentControllerError('エージェントコントローラーは停止済みです。')
 
@@ -922,6 +924,21 @@ class BrowserAgentController:
 			)
 			with self._state_lock:
 				self._initial_prompt_handled = True
+
+			if background:
+
+				def _on_complete(f: Any) -> None:
+					if not completion_callback:
+						return
+					try:
+						result = f.result()
+						completion_callback(result)
+					except Exception as exc:
+						completion_callback(exc)
+
+				future.add_done_callback(_on_complete)
+				return None
+
 			try:
 				return future.result()
 			except AgentControllerError:

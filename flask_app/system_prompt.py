@@ -106,7 +106,8 @@ def _build_custom_system_prompt(
 			template,
 		)
 
-	current_datetime_line = datetime.now().strftime('Current Date/Time: %Y-%m-%d %H:%M')
+	now = datetime.now().astimezone()
+	current_datetime_line = now.strftime('%Y-%m-%d %H:%M %Z (UTC%z, %A)')
 	# Avoid str.format() so literal braces in the template (e.g., action schemas) are preserved
 	# without triggering KeyError for names like "go_to_url".
 	template = template.replace('{max_actions}', str(max_actions_per_step))

@@ -18,7 +18,7 @@ from .controller import BrowserAgentController
 from .conversation_review import _analyze_conversation_history
 from .env_utils import _AGENT_MAX_STEPS, _BROWSER_URL
 from .exceptions import AgentControllerError
-from .formatting import _format_history_messages, _summarize_history
+from .formatting import _append_final_response_notice, _format_history_messages, _summarize_history
 from .history import (
 	_append_history_message,
 	_broadcaster,
@@ -57,6 +57,12 @@ def _save_vision_pref(enabled: bool) -> None:
 
 
 _VISION_PREF = _load_vision_pref()
+
+
+def _finalize_summary(text: str) -> str:
+	"""Ensure run summaries include the final-response marker for downstream consumers."""
+
+	return _append_final_response_notice(text or '')
 
 
 @app.route('/favicon.ico')
@@ -353,7 +359,7 @@ def chat() -> ResponseReturnValue:
 		controller = _get_agent_controller()
 	except AgentControllerError as exc:
 		_append_history_message('user', prompt)
-		message = f'エージェントの実行に失敗しました: {exc}'
+		message = _finalize_summary(f'エージェントの実行に失敗しました: {exc}')
 		logger.warning(message)
 		_append_history_message('assistant', message)
 		_broadcaster.publish(
@@ -369,7 +375,7 @@ def chat() -> ResponseReturnValue:
 	except Exception as exc:
 		_append_history_message('user', prompt)
 		logger.exception('Unexpected error while running browser agent')
-		error_message = f'エージェントの実行中に予期しないエラーが発生しました: {exc}'
+		error_message = _finalize_summary(f'エージェントの実行中に予期しないエラーが発生しました: {exc}')
 		_append_history_message('assistant', error_message)
 		_broadcaster.publish(
 			{
@@ -401,7 +407,7 @@ def chat() -> ResponseReturnValue:
 			controller.prepare_for_new_task()
 		except AgentControllerError as exc:
 			_append_history_message('user', prompt)
-			message = f'新しいタスクを開始できませんでした: {exc}'
+			message = _finalize_summary(f'新しいタスクを開始できませんでした: {exc}')
 			_append_history_message('assistant', message)
 			return jsonify({'messages': _copy_history(), 'run_summary': message}), 400
 
@@ -411,7 +417,7 @@ def chat() -> ResponseReturnValue:
 	if not skip_conversation_review and not controller.is_running() and not controller.has_handled_initial_prompt():
 		analysis = _analyze_conversation_history(_copy_history(), loop=controller.loop)
 		if not analysis.get('needs_action'):
-			reply = analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。'
+			reply = _finalize_summary(analysis.get('reply') or analysis.get('reason') or 'ブラウザ操作は不要と判断しました。')
 			_append_history_message('assistant', reply)
 			controller.mark_initial_prompt_handled()
 			_broadcaster.publish(
@@ -457,11 +463,93 @@ def chat() -> ResponseReturnValue:
 			202,
 		)
 
+	def on_complete(result_or_error: Any) -> None:
+		try:
+			if isinstance(result_or_error, Exception):
+				exc = result_or_error
+				if isinstance(exc, AgentControllerError):
+					message = _finalize_summary(f'エージェントの実行に失敗しました: {exc}')
+					logger.warning(message)
+				else:
+					logger.exception('Unexpected error while running browser agent')
+					message = _finalize_summary(f'エージェントの実行中に予期しないエラーが発生しました: {exc}')
+
+				_append_history_message('assistant', message)
+				_broadcaster.publish(
+					{
+						'type': 'status',
+						'payload': {
+							'agent_running': False,
+							'run_summary': message,
+						},
+					}
+				)
+				return
+
+			run_result = result_or_error
+			# Ensure we have the result object
+			if not hasattr(run_result, 'history'):
+				logger.error('AgentRunResult missing history attribute: %r', run_result)
+				message = _finalize_summary('エージェントの実行結果が不正です。')
+				_append_history_message('assistant', message)
+				_broadcaster.publish(
+					{
+						'type': 'status',
+						'payload': {
+							'agent_running': False,
+							'run_summary': message,
+						},
+					}
+				)
+				return
+
+			agent_history = run_result.filtered_history or run_result.history
+			step_messages = _format_history_messages(agent_history)
+			for step_number, content in step_messages:
+				message_id = run_result.step_message_ids.get(step_number)
+				if message_id is None:
+					message_id = controller.get_step_message_id(step_number)
+				if message_id is not None:
+					_update_history_message(message_id, content)
+					controller.remember_step_message_id(step_number, message_id)
+				else:
+					appended = _append_history_message('assistant', content)
+					new_id = int(appended['id'])
+					controller.remember_step_message_id(step_number, new_id)
+					run_result.step_message_ids[step_number] = new_id
+
+			summary_message = _summarize_history(agent_history)
+			_append_history_message('assistant', summary_message)
+			_broadcaster.publish(
+				{
+					'type': 'status',
+					'payload': {
+						'agent_running': False,
+						'run_summary': summary_message,
+					},
+				}
+			)
+		except Exception as exc:
+			logger.exception('Unexpected error in on_complete callback')
+			error_message = _finalize_summary(f'結果の処理中にエラーが発生しました: {exc}')
+			try:
+				_append_history_message('assistant', error_message)
+				_broadcaster.publish(
+					{
+						'type': 'status',
+						'payload': {
+							'agent_running': False,
+							'run_summary': error_message,
+						},
+					}
+				)
+			except Exception:
+				logger.exception('Failed to report error in on_complete')
+
 	try:
-		run_result = controller.run(prompt)
-		agent_history = run_result.filtered_history or run_result.history
+		controller.run(prompt, background=True, completion_callback=on_complete)
 	except AgentControllerError as exc:
-		message = f'エージェントの実行に失敗しました: {exc}'
+		message = _finalize_summary(f'エージェントの実行に失敗しました: {exc}')
 		logger.warning(message)
 		_append_history_message('assistant', message)
 		_broadcaster.publish(
@@ -476,7 +564,7 @@ def chat() -> ResponseReturnValue:
 		return jsonify({'messages': _copy_history(), 'run_summary': message}), 200
 	except Exception as exc:
 		logger.exception('Unexpected error while running browser agent')
-		error_message = f'エージェントの実行中に予期しないエラーが発生しました: {exc}'
+		error_message = _finalize_summary(f'エージェントの実行中に予期しないエラーが発生しました: {exc}')
 		_append_history_message('assistant', error_message)
 		_broadcaster.publish(
 			{
@@ -489,33 +577,8 @@ def chat() -> ResponseReturnValue:
 		)
 		return jsonify({'messages': _copy_history(), 'run_summary': error_message}), 200
 
-	step_messages = _format_history_messages(agent_history)
-	for step_number, content in step_messages:
-		message_id = run_result.step_message_ids.get(step_number)
-		if message_id is None:
-			message_id = controller.get_step_message_id(step_number)
-		if message_id is not None:
-			_update_history_message(message_id, content)
-			controller.remember_step_message_id(step_number, message_id)
-		else:
-			appended = _append_history_message('assistant', content)
-			new_id = int(appended['id'])
-			controller.remember_step_message_id(step_number, new_id)
-			run_result.step_message_ids[step_number] = new_id
-
-	summary_message = _summarize_history(agent_history)
-	_append_history_message('assistant', summary_message)
-	_broadcaster.publish(
-		{
-			'type': 'status',
-			'payload': {
-				'agent_running': False,
-				'run_summary': summary_message,
-			},
-		}
-	)
-
-	return jsonify({'messages': _copy_history(), 'run_summary': summary_message}), 200
+	# Return immediately with 202 Accepted
+	return jsonify({'messages': _copy_history(), 'run_summary': '', 'agent_running': True}), 202
 
 
 @app.post('/api/agent-relay')

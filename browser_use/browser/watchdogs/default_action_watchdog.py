@@ -1663,7 +1663,6 @@ class DefaultActionWatchdog(BaseWatchdog):
 				self.logger.debug(f'Search query failed: {query}, error: {e}')
 				continue
 
-
 		# Short-circuit if the DOM search succeeded
 		if found:
 			return True

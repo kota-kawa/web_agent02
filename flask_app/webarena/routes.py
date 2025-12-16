@@ -8,9 +8,9 @@ import string
 import subprocess
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
-from contextlib import suppress
 
 from flask import jsonify, render_template, request
 
@@ -65,8 +65,8 @@ RESET_COMMAND = os.getenv(
 if not RESET_COMMAND and not os.getenv('WEBARENA_RESET_URL'):
 	_default_compose_path = os.path.join(os.getcwd(), 'bin/webarena/docker-compose.webarena.yml')
 	if os.path.exists(_default_compose_path):
-		RESET_COMMAND = f"docker compose -f {_default_compose_path} restart shopping shopping_admin gitlab forum"
-		logger.info(f"Configured default WebArena reset command: {RESET_COMMAND}")
+		RESET_COMMAND = f'docker compose -f {_default_compose_path} restart shopping shopping_admin gitlab forum'
+		logger.info(f'Configured default WebArena reset command: {RESET_COMMAND}')
 
 RESET_URL = os.getenv('WEBARENA_RESET_URL')  # e.g., "http://localhost:7000/reset"
 
@@ -134,10 +134,7 @@ def get_tasks():
 	if site_filter and site_filter in SUPPORTED_SITES:
 		# User request: Only show tasks that are exclusively for this site.
 		# Multi-site tasks should only appear in "ALL".
-		tasks = [
-			t for t in tasks
-			if t.get('sites') and len(t['sites']) == 1 and site_filter in t['sites']
-		]
+		tasks = [t for t in tasks if t.get('sites') and len(t['sites']) == 1 and site_filter in t['sites']]
 
 	start = (page - 1) * per_page
 	end = start + per_page
@@ -302,9 +299,7 @@ def _compute_aggregate_metrics(results: list[dict], selected_tasks: list[dict], 
 
 	# Step statistics
 	step_counts_success = [len(r.get('steps') or []) for r in results if r.get('success')]
-	step_counts_overall = [
-		len(r.get('steps') or []) if r.get('success') else max_steps for r in results
-	]
+	step_counts_overall = [len(r.get('steps') or []) if r.get('success') else max_steps for r in results]
 
 	def _safe_mean(values: list[int]) -> float:
 		return statistics.mean(values) if values else 0.0
@@ -457,7 +452,7 @@ def _evaluate_result(history, task, controller):
 					url_found = True
 			except Exception as e:
 				# Log but don't fail yet - try text fallback
-				logger.warning(f"Could not verify browser URL directly: {e}")
+				logger.warning(f'Could not verify browser URL directly: {e}')
 
 			if not url_found:
 				# Fallback to checking text output if browser check fails or doesn't match
@@ -466,8 +461,8 @@ def _evaluate_result(history, task, controller):
 				else:
 					msg = f"Failure: URL '{reference_url}' not found"
 					if current_url:
-						msg += f" in current location ({current_url})"
-					msg += " or output."
+						msg += f' in current location ({current_url})'
+					msg += ' or output.'
 					results.append(msg)
 
 	# 3. Program HTML (DOM Check)
@@ -509,7 +504,7 @@ def _evaluate_result(history, task, controller):
 							results.append(f'Failure (DOM): Missing content in DOM: {", ".join(missing)}')
 
 				except Exception as e:
-						results.append(f"Failure (DOM): Error executing locator '{locator_js}': {e}")
+					results.append(f"Failure (DOM): Error executing locator '{locator_js}': {e}")
 			else:
 				results.append('Failure (DOM): program_html check missing locator')
 
@@ -601,11 +596,7 @@ def run_batch():
 		selected_tasks = [t for t in WEBARENA_TASKS if t.get('task_id') in allowed]
 	elif selected_site and selected_site in SUPPORTED_SITES:
 		# Apply strict filtering: only tasks exclusive to this site
-		selected_tasks = [
-			t
-			for t in WEBARENA_TASKS
-			if t.get('sites') and len(t['sites']) == 1 and selected_site in t['sites']
-		]
+		selected_tasks = [t for t in WEBARENA_TASKS if t.get('sites') and len(t['sites']) == 1 and selected_site in t['sites']]
 
 	if not selected_tasks:
 		return jsonify({'error': '実行可能なタスクがありません。'}), 400
